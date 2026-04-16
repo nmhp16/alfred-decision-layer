@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
 
     if (needsLLM) {
       try {
-        prompt = buildPrompt(input, signals);
+        prompt = buildPrompt(input, signals, conversationState);
       } catch (err) {
         console.error("Prompt build error:", err);
         decisionSource = "fallback";
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
             notes: [...output.notes, `LLM unavailable: ${parsed.fallbackReason}`],
           };
         } else {
-          const override = maybeOverrideLLM(parsed.output, signals);
+          const override = maybeOverrideLLM(parsed.output, signals, conversationState);
           output = override.decision;
           if (override.overridden) {
             decisionSource = "llm_overridden";

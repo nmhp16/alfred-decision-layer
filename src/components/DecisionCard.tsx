@@ -148,6 +148,22 @@ export default function DecisionCard({
       {/* Rationale */}
       <p className="text-sm text-gray-700 mb-3">{decision.rationale}</p>
 
+      {/* LLM Reasoning chain */}
+      {decision.reasoning && decision.reasoning.length > 0 && (
+        <div className="mb-3 space-y-1.5">
+          <p className="text-xs font-medium text-gray-500">Reasoning</p>
+          {decision.reasoning.map((r, i) => (
+            <div key={i} className="flex gap-2 text-xs">
+              <span className="text-gray-400 font-mono shrink-0">{i + 1}.</span>
+              <div>
+                <span className="font-medium text-gray-600">{r.step}</span>
+                <span className="text-gray-500 ml-1">— {r.conclusion}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Follow-up question */}
       {decision.follow_up_question && (
         <div className="mb-3 p-3 bg-white/60 rounded-lg border border-gray-200">

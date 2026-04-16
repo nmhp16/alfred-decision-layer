@@ -116,16 +116,19 @@ Plus `confidence` (0-1) and `confidence_factors` — the system's self-assessmen
 
 ## LLM vs. Code Split
 
-| Situation | Who decides | Why |
-|-----------|-------------|-----|
-| Policy blocked | Code (always) | Binary — LLM has nothing to add |
-| Missing info (entity, params) | Code (always) | Objectively detectable |
-| Low-risk, user-only | Code (always) | No judgment needed |
-| Low-risk, affects others | Code (usually) | Clear boundary |
-| Conflicting instructions + unresolved preconditions | LLM | Temporal nuance + context-dependent reasoning |
-| Mixed risk signals (gray zone) | LLM | Genuine judgment call |
+The LLM classifies intent, assesses risk, and recommends a decision. Code enforces safety rules on top.
 
-**After the LLM responds**, code checks for safety violations and overrides if necessary.
+| Role | Who | Why |
+|------|-----|-----|
+| **Understand intent** | LLM | Regex can't reliably classify "I'm done with groceries" vs "Mark reminder as completed" — the LLM can |
+| **Assess risk** | LLM | Risk is contextual. "Send email" is low-risk to a coworker, high-risk to an external partner with pricing info |
+| **Recommend decision** | LLM | Nuanced judgment considering full conversation context |
+| **Block policy violations** | Code (always) | Binary rules. Confidential data + external recipient = blocked. No judgment needed, no exceptions |
+| **Detect missing info** | Code (always) | Ambiguous entity references and missing params are objectively detectable |
+| **Override unsafe LLM output** | Code (always) | If LLM says execute but policy blocks it, or state machine says HELD — code overrides |
+| **Fallback when LLM fails** | Code | Regex-based signals provide a best-effort decision when the LLM times out or errors |
+
+**Key insight:** Regex is reliable for binary checks (policy keywords, entity ambiguity) but unreliable for understanding intent or assessing risk. The LLM handles classification; code handles safety enforcement.
 
 ## Failure Modes
 
@@ -143,14 +146,14 @@ Plus `confidence` (0-1) and `confidence_factors` — the system's self-assessmen
 
 | # | Name | Expected | Why | LLM Called? |
 |---|------|----------|-----|-------------|
-| 1 | Complete a reminder | Execute silently | Low-risk, reversible, user-only | No |
-| 2 | Move internal standup | Execute & notify | Low-risk but affects coworkers | No |
-| 3 | Ambiguous reschedule | Clarify | "My meeting" but 3 meetings tomorrow | No |
-| 4 | Ambiguous "send the draft" | Clarify | 2 drafts exist — which one? | No |
-| 5 | External email with discount | Confirm | External + sensitive + conflicting instructions | Yes |
-| 6 | Conflicting hold → send | Confirm | Unresolved precondition ("until legal reviews") | Yes |
-| 7 | Forward salary data externally | Refuse | Policy: confidential data can't go external | No |
-| 8 | Failure simulation | Execute & notify (fallback) | Demonstrates graceful degradation — deterministic engine makes a real decision, not a blind "confirm everything" | Simulated |
+| 1 | Complete a reminder | Execute silently | Low-risk, reversible, user-only | Yes (LLM classifies) |
+| 2 | Move internal standup | Execute & notify | Low-risk but affects coworkers | Yes (LLM classifies) |
+| 3 | Ambiguous reschedule | Clarify | "My meeting" but 3 meetings tomorrow | No (code detects ambiguity) |
+| 4 | Ambiguous "send the draft" | Clarify | 2 drafts exist — which one? | No (code detects ambiguity) |
+| 5 | External email with discount | Confirm | External + sensitive + conflicting instructions | Yes (LLM classifies) |
+| 6 | Conflicting hold → send | Confirm | Unresolved precondition ("until legal reviews") | Yes (LLM classifies) |
+| 7 | Forward salary data externally | Refuse | Policy: confidential data can't go external | No (code detects policy violation) |
+| 8 | Failure simulation | Execute & notify (fallback) | Demonstrates graceful degradation — deterministic engine makes a real decision | Simulated |
 
 Scenario 6 is the illustrative example from the challenge. The counterfactual analysis for this scenario shows that removing the "hold off" message changes the decision — proving the system reasons about conversation history, not just the latest message.
 

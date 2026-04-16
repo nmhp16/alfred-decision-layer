@@ -62,12 +62,19 @@ function StateMachineView({ state }: { state: ConversationState }) {
     CONDITION_SET: "bg-orange-100 text-orange-700",
     CONDITION_MET: "bg-emerald-100 text-emerald-700",
     PENDING_RELEASE: "bg-amber-200 text-amber-800",
+    BLOCKED: "bg-red-300 text-red-900",
     READY: "bg-green-200 text-green-800",
+  };
+
+  const ROLE_STYLES: Record<string, string> = {
+    user: "border-blue-300 bg-blue-50",
+    assistant: "border-gray-300 bg-gray-50",
+    system: "border-purple-300 bg-purple-50",
   };
 
   return (
     <div className="space-y-3">
-      {/* State flow visualization */}
+      {/* State flow */}
       <div className="flex flex-wrap items-center gap-1">
         {state.stateHistory.map((s, i) => (
           <div key={i} className="flex items-center gap-1">
@@ -81,28 +88,29 @@ function StateMachineView({ state }: { state: ConversationState }) {
         ))}
       </div>
 
-      {/* Current state */}
-      <div className={`p-2 rounded text-xs ${STATE_COLORS[state.currentState] || "bg-gray-100"}`}>
-        <strong>Current:</strong> {state.currentState}
-      </div>
-
-      {/* Transitions */}
-      {state.transitions.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-xs font-medium text-gray-500">Transitions:</p>
-          {state.transitions.map((t, i) => (
-            <div key={i} className="text-xs text-gray-600 pl-2 border-l-2 border-gray-200 py-1">
-              <span className="font-mono">{t.from} → {t.to}</span>
-              {t.timestamp && <span className="text-gray-400 ml-2">@ {t.timestamp}</span>}
-              <div className="text-gray-400 mt-0.5 truncate">&ldquo;{t.trigger.slice(0, 80)}{t.trigger.length > 80 ? "..." : ""}&rdquo;</div>
+      {/* Incremental steps — only show state-changing steps to reduce noise */}
+      {state.steps.filter((s) => s.changed).length > 0 && (
+        <div className="space-y-1.5">
+          {state.steps.filter((s) => s.changed).map((step, i) => (
+            <div key={i} className={`text-xs rounded-lg border-l-4 pl-3 py-2 pr-2 ${ROLE_STYLES[step.role] || "border-gray-200 bg-gray-50"}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${STATE_COLORS[step.newState] || "bg-gray-100"}`}>
+                  {step.previousState} → {step.newState}
+                </span>
+                <span className="text-gray-400">{step.role}{step.timestamp ? ` @ ${step.timestamp}` : ""}</span>
+              </div>
+              {step.role !== "system" && (
+                <div className="text-gray-400 truncate mb-1">&ldquo;{step.message}&rdquo;</div>
+              )}
+              <div className="text-gray-700">{step.understanding}</div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Insight */}
-      <div className="p-2 bg-gray-50 rounded text-xs text-gray-700">
-        <strong>Insight:</strong> {state.insight}
+      {/* Final insight */}
+      <div className={`p-2 rounded text-xs ${STATE_COLORS[state.currentState] || "bg-gray-100"}`}>
+        <strong>Final state: {state.currentState}</strong> — {state.finalInsight}
       </div>
     </div>
   );
@@ -230,6 +238,9 @@ function SignalsTable({ signals }: { signals: ComputedSignals }) {
       <SignalRow label="contains_sensitive_domain" value={String(signals.contains_sensitive_domain)} warn={signals.contains_sensitive_domain} />
       <SignalRow label="risk_score" value={String(signals.risk_score)} warn={signals.risk_score > 0.4} />
       <SignalRow label="policy_blocked" value={String(signals.policy_blocked)} warn={signals.policy_blocked} />
+      {signals.policy_reason && (
+        <div className="text-xs text-red-600 pl-2 py-0.5 font-medium">{signals.policy_reason}</div>
+      )}
 
       <p className="text-xs font-semibold text-gray-500 uppercase mt-4 mb-2">Temporal</p>
       <SignalRow label="hold_recency_minutes" value={signals.hold_recency_minutes !== null ? `${signals.hold_recency_minutes}m ago` : "n/a"} warn={signals.hold_recency_minutes !== null && signals.hold_recency_minutes < 30} />

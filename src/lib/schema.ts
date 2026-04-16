@@ -11,9 +11,15 @@ export const DecisionEnum = z.enum([
 
 export const RiskLevelEnum = z.enum(["low", "medium", "high"]);
 
+export const ReasoningStepSchema = z.object({
+  step: z.string(),
+  conclusion: z.string(),
+});
+
 export const DecisionOutputSchema = z.object({
   decision: DecisionEnum,
   rationale: z.string(),
+  reasoning: z.array(ReasoningStepSchema).optional(),
   follow_up_question: z.string(),
   risk_level: RiskLevelEnum,
   notes: z.array(z.string()),
@@ -68,6 +74,7 @@ export interface ComputedSignals {
   contains_sensitive_domain: boolean;
   risk_score: number;
   policy_blocked: boolean;
+  policy_reason: string | null;
   // Temporal signals
   hold_recency_minutes: number | null;    // how recently did the user say "hold off"
   approval_recency_minutes: number | null; // how recently did the user approve
@@ -109,11 +116,22 @@ export interface ReconstructedActionResult {
   reconstructedFrom: string[];
 }
 
+export interface ConversationStateStep {
+  messageIndex: number;
+  role: "user" | "assistant" | "system";
+  message: string;
+  timestamp: string | null;
+  previousState: string;
+  newState: string;
+  changed: boolean;
+  understanding: string;
+}
+
 export interface ConversationState {
   currentState: string;
-  transitions: { from: string; to: string; trigger: string; messageIndex: number; timestamp: string | null }[];
+  steps: ConversationStateStep[];
   stateHistory: string[];
-  insight: string;
+  finalInsight: string;
 }
 
 // ── Full API response ──────────────────────────────────────────────

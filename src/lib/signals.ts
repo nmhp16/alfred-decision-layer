@@ -60,11 +60,13 @@ const RESOLUTION_PATTERNS = [
 ];
 
 const POLICY_BLOCKED_PATTERNS = [
-  { test: (action: string, context: string) =>
+  { reason: "Confidential or restricted content cannot be shared with external parties",
+    test: (action: string, context: string) =>
     /confidential|internal\s+only|restricted/i.test(context) &&
     /forward|send|share/i.test(action) &&
     isExternalContext(action, context) },
-  { test: (action: string, context: string) =>
+  { reason: "Sensitive personal data (salary, compensation, SSN) cannot be shared externally",
+    test: (action: string, context: string) =>
     /salary|compensation|ssn|password/i.test(context) &&
     /forward|send|share/i.test(action) &&
     isExternalContext(action, context) },
@@ -77,20 +79,41 @@ function isExternalContext(action: string, context: string): boolean {
 
 // ── Detect action type from text ───────────────────────────────────
 
-function detectActionType(action: string): string {
+// Match quality: how confident are we in the action type detection?
+// "strong" = multiple keywords matched or very specific pattern
+// "weak" = single generic keyword, could be misclassified
+// "none" = no match at all
+interface ActionDetection {
+  type: string;
+  matchQuality: "strong" | "weak" | "none";
+}
+
+function detectActionType(action: string): ActionDetection {
   const a = action.toLowerCase();
-  if (/complete|mark.*done|finish.*reminder/i.test(a)) return "complete_reminder";
-  if (/forward/i.test(a)) return "forward_email";
-  if (/reply/i.test(a)) return "reply_email";
-  if (/send.*email|email.*send/i.test(a)) return "send_email";
-  if (/send.*draft|draft.*send/i.test(a)) return "send_email";
-  if (/reschedule/i.test(a)) return "reschedule_meeting";
-  if (/cancel.*meeting/i.test(a)) return "cancel_meeting";
-  if (/move.*meeting|move.*event|move.*standup/i.test(a)) return "move_calendar_event";
-  if (/schedule|set.*meeting/i.test(a)) return "schedule_meeting";
-  if (/reminder|remind/i.test(a)) return "set_reminder";
-  if (/draft/i.test(a)) return "draft_email";
-  return "unknown";
+
+  // Strong matches — multiple specific keywords
+  if (/(?:complete|mark.*done|finish).*reminder|(?:mark|complete).*reminder.*(?:done|completed)|reminder.*(?:completed|done|finished)/i.test(a)) return { type: "complete_reminder", matchQuality: "strong" };
+  if (/forward.*(?:email|message|to\s)/i.test(a)) return { type: "forward_email", matchQuality: "strong" };
+  if (/reply.*(?:email|to\s|message)/i.test(a)) return { type: "reply_email", matchQuality: "strong" };
+  if (/send.*(?:email|message)/i.test(a)) return { type: "send_email", matchQuality: "strong" };
+  if (/(?:send|email).*draft/i.test(a)) return { type: "send_email", matchQuality: "strong" };
+  if (/reschedule.*(?:meeting|call|event)/i.test(a)) return { type: "reschedule_meeting", matchQuality: "strong" };
+  if (/cancel.*meeting/i.test(a)) return { type: "cancel_meeting", matchQuality: "strong" };
+  if (/move.*(?:meeting|event|standup)/i.test(a)) return { type: "move_calendar_event", matchQuality: "strong" };
+  if (/(?:schedule|set).*(?:meeting|call)/i.test(a)) return { type: "schedule_meeting", matchQuality: "strong" };
+  if (/(?:set|create).*reminder/i.test(a)) return { type: "set_reminder", matchQuality: "strong" };
+
+  // Weak matches — single keyword, could be wrong context
+  if (/\bforward\b/i.test(a)) return { type: "forward_email", matchQuality: "weak" };
+  if (/\breply\b/i.test(a)) return { type: "reply_email", matchQuality: "weak" };
+  if (/\bsend\b/i.test(a)) return { type: "send_email", matchQuality: "weak" };
+  if (/\breschedule\b/i.test(a)) return { type: "reschedule_meeting", matchQuality: "weak" };
+  if (/\bschedule\b/i.test(a)) return { type: "schedule_meeting", matchQuality: "weak" };
+  if (/\bremind/i.test(a)) return { type: "set_reminder", matchQuality: "weak" };
+  if (/\bdraft\b/i.test(a)) return { type: "draft_email", matchQuality: "weak" };
+  if (/\bcomplete\b|\bmark\b|\bdone\b/i.test(a)) return { type: "complete_reminder", matchQuality: "weak" };
+
+  return { type: "unknown", matchQuality: "none" };
 }
 
 // ── Timestamp parsing ──────────────────────────────────────────────
@@ -114,7 +137,9 @@ function minutesBetween(a: Date, b: Date): number {
 // ── Main signal computation ────────────────────────────────────────
 
 export function computeSignals(input: ScenarioInput): ComputedSignals {
-  const actionType = detectActionType(input.action);
+  const detection = detectActionType(input.action);
+  const actionType = detection.type;
+  const matchQuality = detection.matchQuality;
   const actionConfig = ACTION_TYPES[actionType];
   const allText = [
     input.action,
@@ -234,7 +259,9 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   const contains_sensitive_domain = SENSITIVE_KEYWORDS.some((kw) => kw.test(allText));
 
   // Policy blocked
-  const policy_blocked = POLICY_BLOCKED_PATTERNS.some((p) => p.test(input.action, allText));
+  const matchedPolicy = POLICY_BLOCKED_PATTERNS.find((p) => p.test(input.action, allText));
+  const policy_blocked = !!matchedPolicy;
+  const policy_reason = matchedPolicy?.reason || null;
 
   // Risk score (0-1 weighted composite)
   let risk_score = 0;
@@ -256,6 +283,14 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   let confidence = 0;
   const confidence_factors: string[] = [];
 
+  // Match quality penalty — weak regex matches reduce confidence
+  const matchPenalty = matchQuality === "strong" ? 0 : matchQuality === "weak" ? 0.25 : 0.5;
+  if (matchQuality === "weak") {
+    confidence_factors.push("Weak pattern match on action type — single keyword only, may be misclassified");
+  } else if (matchQuality === "none") {
+    confidence_factors.push("Action type unknown — no pattern matched, LLM needed for classification");
+  }
+
   // High confidence cases: signals clearly point to one answer
   if (policy_blocked) {
     confidence = 0.99;
@@ -264,11 +299,13 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     confidence = 0.95;
     confidence_factors.push("Missing info is objectively detectable — always clarify");
   } else if (risk_score < 0.1 && !affects_others && !is_irreversible) {
-    confidence = 0.9;
-    confidence_factors.push("All signals indicate safe silent execution");
+    confidence = matchQuality === "strong" ? 0.9 : 0.9 - matchPenalty;
+    confidence_factors.push(matchQuality === "strong"
+      ? "All signals indicate safe silent execution (strong match)"
+      : "Signals suggest safe execution, but action classification is uncertain");
   } else if (risk_score < 0.15 && affects_others && !is_external_facing) {
-    confidence = 0.85;
-    confidence_factors.push("Low risk + affects others = notify (clear boundary)");
+    confidence = matchQuality === "strong" ? 0.85 : 0.85 - matchPenalty;
+    confidence_factors.push("Low risk + affects others = notify");
   } else {
     // Ambiguous zone — this is where the LLM adds value
     confidence = 0.3; // low base
@@ -315,6 +352,7 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     contains_sensitive_domain,
     risk_score,
     policy_blocked,
+    policy_reason,
     hold_recency_minutes,
     approval_recency_minutes,
     unresolved_preconditions,

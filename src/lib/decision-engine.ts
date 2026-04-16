@@ -1,10 +1,12 @@
-import { DecisionOutput, ComputedSignals, DecisionSource } from "./schema";
+import { DecisionOutput, ComputedSignals, DecisionSource, ConversationState } from "./schema";
 
 // ── Confidence threshold ──────────────────────────────────────────
-// Only skip the LLM when signals are unambiguous (policy block, missing
-// info, zero-risk actions). For everything else, let the LLM reason —
-// real user messages are too varied for keyword matching alone.
-const CONFIDENCE_THRESHOLD = 0.9;
+// Only skip the LLM for things code can RELIABLY detect:
+// - Policy blocks (keyword matching IS reliable for binary policy rules)
+// - Missing info (ambiguous entities are objectively detectable)
+// Everything else goes to the LLM. Regex can't reliably classify
+// intent, risk, or who's affected for novel user messages.
+const CONFIDENCE_THRESHOLD = 0.97;
 
 export interface DeterministicResult {
   decision: DecisionOutput;
@@ -29,12 +31,12 @@ export function deterministicDecision(signals: ComputedSignals): DeterministicRe
     return {
       decision: {
         decision: "refuse_or_escalate",
-        rationale: "Policy violation detected. This action is blocked regardless of user intent or approval.",
+        rationale: `Policy violation: ${signals.policy_reason || "this action is blocked by policy rules"}. This cannot be overridden by user approval.`,
         follow_up_question: "",
         risk_level: "high",
         notes: [
-          "Deterministic: policy_blocked = true",
-          "Code override: policy rules are never delegated to LLM",
+          `Policy rule: ${signals.policy_reason || "policy_blocked = true"}`,
+          "Code enforced: policy rules are deterministic and never delegated to LLM",
         ],
       },
       source: "deterministic",
@@ -169,7 +171,8 @@ function makeRiskDecision(signals: ComputedSignals): DecisionOutput {
  */
 export function maybeOverrideLLM(
   llmDecision: DecisionOutput,
-  signals: ComputedSignals
+  signals: ComputedSignals,
+  conversationState?: ConversationState
 ): { decision: DecisionOutput; overridden: boolean; reason: string | null } {
   // Override 1: LLM says execute but policy is blocked
   if (signals.policy_blocked && llmDecision.decision !== "refuse_or_escalate") {
@@ -228,6 +231,51 @@ export function maybeOverrideLLM(
         reason: "LLM tried to act on incomplete information — forced clarification",
       };
     }
+  }
+
+  // Override 5: State machine says HELD — cannot execute
+  if (conversationState?.currentState === "HELD" &&
+    (llmDecision.decision === "execute_silently" || llmDecision.decision === "execute_and_notify")) {
+    return {
+      decision: {
+        ...llmDecision,
+        decision: "confirm_before_execute",
+        rationale: `[State override] Conversation is in HELD state — user explicitly asked to hold. ${llmDecision.rationale}`,
+        risk_level: "high",
+      },
+      overridden: true,
+      reason: "LLM tried to execute while conversation state is HELD",
+    };
+  }
+
+  // Override 6: State machine says PENDING_RELEASE — condition unresolved, must confirm
+  if (conversationState?.currentState === "PENDING_RELEASE" &&
+    (llmDecision.decision === "execute_silently" || llmDecision.decision === "execute_and_notify")) {
+    return {
+      decision: {
+        ...llmDecision,
+        decision: "confirm_before_execute",
+        rationale: `[State override] User wants to proceed but a prior condition may not be resolved. ${llmDecision.rationale}`,
+        risk_level: "high",
+      },
+      overridden: true,
+      reason: "LLM tried to execute in PENDING_RELEASE state — unresolved condition",
+    };
+  }
+
+  // Override 7: State machine says CONDITION_SET — action is blocked by condition
+  if (conversationState?.currentState === "CONDITION_SET" &&
+    (llmDecision.decision === "execute_silently" || llmDecision.decision === "execute_and_notify")) {
+    return {
+      decision: {
+        ...llmDecision,
+        decision: "confirm_before_execute",
+        rationale: `[State override] A precondition was set and has not been resolved. Cannot execute. ${llmDecision.rationale}`,
+        risk_level: "high",
+      },
+      overridden: true,
+      reason: "LLM tried to execute while a precondition is still active",
+    };
   }
 
   // No override needed
