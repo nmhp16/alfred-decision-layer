@@ -22,10 +22,28 @@ export async function POST(request: NextRequest) {
     const startTime = Date.now();
 
     // Step 1: Compute deterministic signals
-    const signals = computeSignals(input);
+    let signals;
+    try {
+      signals = computeSignals(input);
+    } catch (err) {
+      console.error("Signal computation error:", err);
+      return NextResponse.json(
+        { error: "Failed to compute signals", details: String(err) },
+        { status: 500 }
+      );
+    }
 
     // Step 2: Build prompt
-    const prompt = buildPrompt(input, signals);
+    let prompt;
+    try {
+      prompt = buildPrompt(input, signals);
+    } catch (err) {
+      console.error("Prompt build error:", err);
+      return NextResponse.json(
+        { error: "Failed to build prompt", details: String(err) },
+        { status: 500 }
+      );
+    }
 
     // Step 3: Call LLM (or simulate failure)
     let rawOutput: string;
@@ -35,7 +53,7 @@ export async function POST(request: NextRequest) {
     if (input.simulateFailure === "timeout") {
       rawOutput = "";
       timedOut = true;
-      llmError = "Simulated LLM timeout (15s exceeded)";
+      llmError = "Simulated LLM timeout (30s exceeded)";
     } else if (input.simulateFailure === "malformed_json") {
       rawOutput = '{"decision": "execute_silently", "rationale": "test", broken json here!!!';
       timedOut = false;

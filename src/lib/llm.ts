@@ -7,12 +7,12 @@ interface LLMResult {
 }
 
 export async function callLLM(prompt: string): Promise<LLMResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
     return {
       rawOutput: "",
       timedOut: false,
-      error: "GEMINI_API_KEY is not configured",
+      error: "GROQ_API_KEY is not configured",
     };
   }
 
@@ -21,17 +21,25 @@ export async function callLLM(prompt: string): Promise<LLMResult> {
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      "https://api.groq.com/openai/v1/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 2048,
-            responseMimeType: "application/json",
-          },
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            {
+              role: "system",
+              content: "You are alfred_'s execution decision layer. Respond with valid JSON only, no markdown fences.",
+            },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.3,
+          max_tokens: 2048,
+          response_format: { type: "json_object" },
         }),
         signal: controller.signal,
       }
@@ -41,16 +49,29 @@ export async function callLLM(prompt: string): Promise<LLMResult> {
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
+      let errorMsg = `Groq API error ${response.status}`;
+      try {
+        const errJson = JSON.parse(errText);
+        const message = errJson?.error?.message;
+        if (message) {
+          errorMsg = `Groq API error ${response.status}: ${message.split("\n")[0]}`;
+        }
+      } catch {
+        if (errText.length > 200) {
+          errorMsg += `: ${errText.slice(0, 200)}...`;
+        } else if (errText) {
+          errorMsg += `: ${errText}`;
+        }
+      }
       return {
         rawOutput: "",
         timedOut: false,
-        error: `Gemini API error ${response.status}: ${errText}`,
+        error: errorMsg,
       };
     }
 
     const data = await response.json();
-    const rawOutput =
-      data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const rawOutput = data.choices?.[0]?.message?.content ?? "";
 
     return { rawOutput, timedOut: false, error: null };
   } catch (err: unknown) {

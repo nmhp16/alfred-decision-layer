@@ -67,6 +67,7 @@ function SignalsTable({ signals }: { signals: ComputedSignals }) {
       />
       <SignalRow label="is_external_facing" value={String(signals.is_external_facing)} warn={signals.is_external_facing} />
       <SignalRow label="is_irreversible" value={String(signals.is_irreversible)} warn={signals.is_irreversible} />
+      <SignalRow label="affects_others" value={String(signals.affects_others)} warn={signals.affects_others} />
       <SignalRow label="contains_sensitive_domain" value={String(signals.contains_sensitive_domain)} warn={signals.contains_sensitive_domain} />
       <SignalRow label="risk_score" value={String(signals.risk_score)} warn={signals.risk_score > 0.4} />
       <SignalRow label="policy_blocked" value={String(signals.policy_blocked)} warn={signals.policy_blocked} />

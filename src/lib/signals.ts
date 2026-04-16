@@ -16,9 +16,9 @@ const ACTION_TYPES: Record<string, { irreversible: boolean; externalFacing: bool
 };
 
 const SENSITIVE_KEYWORDS = [
-  "pricing", "discount", "salary", "compensation", "confidential",
-  "nda", "legal", "contract", "internal only", "restricted",
-  "proprietary", "trade secret", "personal", "ssn", "password",
+  /\bpricing\b/i, /\bdiscount\b/i, /\bsalary\b/i, /\bcompensation\b/i, /\bconfidential\b/i,
+  /\bnda\b/i, /\blegal\b/i, /\bcontract\b/i, /\binternal only\b/i, /\brestricted\b/i,
+  /\bproprietary\b/i, /\btrade secret\b/i, /\bpersonal\b/i, /\bssn\b/i, /\bpassword\b/i,
 ];
 
 const HOLD_PATTERNS = [
@@ -141,9 +141,19 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   // Irreversible
   const is_irreversible = actionConfig?.irreversible ?? false;
 
+  // Affects others: actions involving attendees, recipients, or shared resources
+  const AFFECTS_OTHERS_PATTERNS = [
+    /attendee/i, /participant/i, /team/i, /standup/i, /sync/i,
+    /1:1/i, /one.on.one/i, /meeting/i, /call\b/i, /review\b/i,
+    /send.*to/i, /forward.*to/i, /reply/i, /cc\b/i, /bcc\b/i,
+    /invite/i, /schedule.*with/i, /cancel.*meeting/i,
+  ];
+  const affects_others = is_external_facing ||
+    AFFECTS_OTHERS_PATTERNS.some((p) => p.test(allText));
+
   // Sensitive domain
   const contains_sensitive_domain = SENSITIVE_KEYWORDS.some((kw) =>
-    allText.toLowerCase().includes(kw)
+    kw.test(allText)
   );
 
   // Policy blocked
@@ -171,6 +181,7 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     has_conflicting_prior_instruction,
     is_external_facing,
     is_irreversible,
+    affects_others,
     contains_sensitive_domain,
     risk_score,
     policy_blocked,

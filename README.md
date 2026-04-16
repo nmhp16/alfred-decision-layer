@@ -7,7 +7,7 @@ A minimal full-stack prototype that decides how an AI text-message assistant sho
 ```bash
 npm install
 cp .env.example .env.local
-# Edit .env.local and add your Gemini API key
+# Edit .env.local and add your Groq API key
 npm run dev
 ```
 
@@ -25,7 +25,7 @@ User Input (action + conversation context)
   Prompt Assembly (signals + context --> structured prompt)
         |
         v
-  Gemini 2.5 Flash API Call (with 30s timeout)
+  Groq API Call — Llama 3.3 70B (with 30s timeout)
         |
         v
   Zod Validation + Safe Fallback
@@ -36,7 +36,7 @@ User Input (action + conversation context)
 
 ## Signals: What and Why
 
-The system computes 10 deterministic signals in code *before* the LLM sees anything. This separation is deliberate: signals that can be computed reliably with rules should be, so the LLM focuses on nuanced judgment rather than pattern matching.
+The system computes 11 deterministic signals in code *before* the LLM sees anything. This separation is deliberate: signals that can be computed reliably with rules should be, so the LLM focuses on nuanced judgment rather than pattern matching.
 
 | Signal | Type | Why |
 |--------|------|-----|
@@ -47,6 +47,7 @@ The system computes 10 deterministic signals in code *before* the LLM sees anyth
 | `has_conflicting_prior_instruction` | boolean | Detects when a user said "hold off" and later said "go ahead" — the system should not treat the latest message in isolation. |
 | `is_external_facing` | boolean | Actions that send data outside the organization carry inherently higher risk. |
 | `is_irreversible` | boolean | Sending an email can't be undone. Moving a calendar event can. This distinction matters for silent execution thresholds. |
+| `affects_others` | boolean | Actions involving attendees, recipients, or shared resources should never execute silently — other people are impacted. |
 | `contains_sensitive_domain` | boolean | Keywords like pricing, salary, legal, confidential flag content that warrants extra caution. |
 | `risk_score` | number (0-1) | Weighted composite of all above signals. Gives the LLM a single summary metric alongside the individual signals. |
 | `policy_blocked` | boolean | Hard policy rules — e.g., confidential internal data cannot be sent to external parties. This overrides LLM judgment. |
@@ -100,9 +101,20 @@ Key design choices:
 | **Missing critical context** | Signals detect missing params/entities | Falls back to `ask_clarifying_question` |
 | **API key missing** | Error returned to frontend | Clear error message, no fallback execution |
 
-The LLM is called with `responseMimeType: "application/json"` which instructs Gemini to return valid JSON natively, reducing parse failures.
+The LLM is called with `response_format: { type: "json_object" }` which instructs Groq to return valid JSON natively, reducing parse failures.
 
-**Core safety principle:** The system *never* falls back to `execute_silently`. When uncertain, it always errs toward confirmation or clarification. This is the most important design decision in the entire system.
+**Rule-based fallback engine:** When the LLM is unavailable (timeout, rate limit, API error), the system does not blindly default to "confirm." Instead, it uses the pre-computed signals to make a real decision via deterministic rules:
+
+- `policy_blocked` → refuse/escalate
+- Missing intent, entity, or params → ask clarifying question (with a context-aware question)
+- Conflicting prior instructions → confirm
+- Risk score >= 0.4 → confirm (with risk factors listed)
+- Low risk + internal + reversible → execute silently
+- Everything else → execute and notify
+
+This means the system degrades gracefully — most scenarios still get the *correct* decision even without the LLM. The LLM adds nuance and rationale quality, but the signals carry the core logic.
+
+**Core safety principle:** The system *never* falls back to `execute_silently` when it has no signals. When uncertain, it always errs toward confirmation or clarification.
 
 The failure simulation scenario (scenario 8) makes this visible in the UI — you can toggle between timeout and malformed JSON to see the fallback behavior with full debug pipeline transparency.
 
@@ -161,11 +173,36 @@ Scenario 6 is the illustrative example from the challenge: the system detects co
 - **Streaming** — The LLM call blocks and returns. Streaming would improve perceived latency but adds complexity.
 - **Dark mode** — Visual polish was explicitly deprioritized.
 
+## Deployment
+
+### Vercel (Recommended)
+
+1. Push to GitHub
+2. Import the repo at [vercel.com/new](https://vercel.com/new)
+3. Add the environment variable `GROQ_API_KEY` in Project Settings > Environment Variables
+4. Deploy — Vercel auto-detects Next.js
+
+### Manual
+
+```bash
+npm install
+npm run build
+GROQ_API_KEY=your_key npm start
+```
+
+The app runs on `http://localhost:3000` by default.
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | Yes | API key from [Groq Console](https://console.groq.com/keys) |
+
 ## Tech Stack
 
 - **Next.js 16** (App Router) — Single deployable for API + frontend
 - **TypeScript** — Type safety throughout
 - **Tailwind CSS** — Minimal styling
-- **Gemini 2.5 Flash** via REST API — Fast, capable reasoning with native JSON output mode
+- **Llama 3.3 70B** via Groq API — Fast inference with native JSON output mode
 - **Zod** — Runtime validation of LLM output
 - **Vercel** — Deployment

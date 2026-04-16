@@ -6,31 +6,131 @@ interface FallbackResult {
   fallbackReason: string | null;
 }
 
-/** Safe default — never execute silently on fallback */
+// ── Rule-based decision engine (used when LLM is unavailable) ─────
+
+function ruleBasedDecision(signals: ComputedSignals): DecisionOutput {
+  const reasons: string[] = [];
+
+  // Hard policy block — always refuse
+  if (signals.policy_blocked) {
+    return {
+      decision: "refuse_or_escalate",
+      rationale: "Policy violation detected. This action is blocked regardless of user intent.",
+      follow_up_question: "",
+      risk_level: "high",
+      notes: ["Rule-based: policy_blocked signal triggered refusal"],
+    };
+  }
+
+  // Missing intent or entity — ask for clarification
+  if (!signals.intent_resolved) {
+    reasons.push("intent is unclear");
+  }
+  if (!signals.entity_resolved) {
+    reasons.push("referenced entity is ambiguous");
+  }
+  if (signals.missing_required_params.length > 0) {
+    reasons.push(`missing required info: ${signals.missing_required_params.join(", ")}`);
+  }
+  if (reasons.length > 0) {
+    return {
+      decision: "ask_clarifying_question",
+      rationale: `Cannot proceed: ${reasons.join("; ")}.`,
+      follow_up_question: generateClarifyingQuestion(signals),
+      risk_level: "medium",
+      notes: ["Rule-based: insufficient context to act safely"],
+    };
+  }
+
+  // Conflicting instructions — always confirm
+  if (signals.has_conflicting_prior_instruction) {
+    return {
+      decision: "confirm_before_execute",
+      rationale: "Detected conflicting instructions in conversation history. Confirming to ensure the latest intent is correct.",
+      follow_up_question: "",
+      risk_level: "high",
+      notes: ["Rule-based: conflicting prior instructions detected"],
+    };
+  }
+
+  // High risk (external + sensitive/irreversible) — confirm
+  if (signals.risk_score >= 0.4) {
+    return {
+      decision: "confirm_before_execute",
+      rationale: `Risk score ${signals.risk_score} exceeds silent execution threshold. ${describeRiskFactors(signals)}`,
+      follow_up_question: "",
+      risk_level: signals.risk_score >= 0.6 ? "high" : "medium",
+      notes: ["Rule-based: risk score above confirmation threshold (0.4)"],
+    };
+  }
+
+  // Low risk, internal, reversible, affects only user — execute silently
+  if (!signals.is_external_facing && !signals.is_irreversible && !signals.affects_others && signals.risk_score < 0.15) {
+    return {
+      decision: "execute_silently",
+      rationale: "Low-risk, internal, reversible action that affects only the user.",
+      follow_up_question: "",
+      risk_level: "low",
+      notes: ["Rule-based: all signals indicate safe silent execution"],
+    };
+  }
+
+  // Low risk but affects others — execute and notify
+  return {
+    decision: "execute_and_notify",
+    rationale: `Action is clear and low-risk but affects other people — notifying user. ${describeRiskFactors(signals)}`,
+    follow_up_question: "",
+    risk_level: "low",
+    notes: ["Rule-based: safe to execute with notification (affects others)"],
+  };
+}
+
+function generateClarifyingQuestion(signals: ComputedSignals): string {
+  if (!signals.intent_resolved) {
+    return "I'm not sure what action you'd like me to take. Could you be more specific?";
+  }
+  if (!signals.entity_resolved) {
+    return "It looks like there are multiple possible matches. Which one did you mean?";
+  }
+  if (signals.missing_required_params.length > 0) {
+    return `I need a bit more info before proceeding: ${signals.missing_required_params.join(", ")}. Could you fill in the details?`;
+  }
+  return "Could you provide more details about what you'd like me to do?";
+}
+
+function describeRiskFactors(signals: ComputedSignals): string {
+  const factors: string[] = [];
+  if (signals.is_external_facing) factors.push("external-facing");
+  if (signals.is_irreversible) factors.push("irreversible");
+  if (signals.contains_sensitive_domain) factors.push("sensitive content");
+  if (signals.has_conflicting_prior_instruction) factors.push("conflicting instructions");
+  return factors.length > 0 ? `Risk factors: ${factors.join(", ")}.` : "";
+}
+
+/** Safe fallback — uses rule-based engine when signals are available */
 function safeFallback(reason: string, signals?: ComputedSignals): FallbackResult {
-  // If we know context is missing, ask a clarifying question
-  if (signals && (!signals.intent_resolved || !signals.entity_resolved || signals.missing_required_params.length > 0)) {
+  // If we have signals, use the rule-based engine for a real decision
+  if (signals) {
+    const output = ruleBasedDecision(signals);
     return {
       output: {
-        decision: "ask_clarifying_question",
-        rationale: `Fallback triggered: ${reason}. Insufficient context to proceed safely.`,
-        follow_up_question: "Could you provide more details about what you'd like me to do?",
-        risk_level: "medium",
-        notes: [`Fallback reason: ${reason}`, "System defaulted to asking for clarification"],
+        ...output,
+        rationale: `[Rule-based fallback] ${output.rationale}`,
+        notes: [...output.notes, `LLM unavailable: ${reason}`],
       },
       fallbackApplied: true,
       fallbackReason: reason,
     };
   }
 
-  // Default: confirm before executing
+  // No signals at all — truly blind, default to confirmation
   return {
     output: {
       decision: "confirm_before_execute",
-      rationale: `Fallback triggered: ${reason}. Defaulting to safe confirmation to avoid unintended actions.`,
+      rationale: `Fallback triggered: ${reason}. No signals available — defaulting to safe confirmation.`,
       follow_up_question: "",
       risk_level: "high",
-      notes: [`Fallback reason: ${reason}`, "System defaulted to confirmation for safety"],
+      notes: [`Fallback reason: ${reason}`, "No computed signals — cannot make informed decision"],
     },
     fallbackApplied: true,
     fallbackReason: reason,
@@ -46,7 +146,7 @@ export function parseAndValidate(
 ): FallbackResult {
   // Case 1: LLM timeout
   if (timedOut) {
-    return safeFallback("LLM request timed out after 15 seconds", signals);
+    return safeFallback("LLM request timed out after 30 seconds", signals);
   }
 
   // Case 2: LLM error

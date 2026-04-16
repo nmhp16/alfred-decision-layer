@@ -56,6 +56,7 @@ export interface ComputedSignals {
   has_conflicting_prior_instruction: boolean;
   is_external_facing: boolean;
   is_irreversible: boolean;
+  affects_others: boolean;
   contains_sensitive_domain: boolean;
   risk_score: number;
   policy_blocked: boolean;
