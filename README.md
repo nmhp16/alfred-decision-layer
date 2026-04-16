@@ -30,10 +30,11 @@ This is a UX judgment: unnecessary confirmations erode trust ("why is alfred_ as
 The LLM is good at understanding intent ("I'm done with groceries" = complete a reminder). Code is good at enforcing rules (confidential data + external recipient = always refuse).
 
 The split:
-- **LLM classifies** the action: what type, who's affected, what's the risk, what should alfred_ do
+- **Code classifies** the action type using an NLP intent classifier (tokenization, bigram matching, negation detection, disambiguation penalties) — no LLM call needed for classification
+- **LLM handles** ambiguous cases where the deterministic engine's confidence is low — contextual risk assessment, nuanced judgment
 - **Code enforces** safety rules on top: policy blocks, state machine constraints, precondition checks
 - **Code overrides LLM** when it violates invariants (tries to execute when policy blocks, or when state machine says HELD)
-- **Code falls back** to regex-based signals when the LLM is unavailable
+- **Code falls back** to deterministic NLP signals when the LLM is unavailable
 
 This means the LLM can never approve something the rules forbid, and the system still works when the LLM is down.
 
@@ -67,7 +68,7 @@ This is visible in the debug panel for every scenario.
 - **No persistent state.** Decisions aren't logged to a database. In production, every decision should be logged immutably for audit and learning.
 - **No user profiles.** Every user gets the same risk thresholds. In production, power users should earn lower thresholds over time.
 - **No real integrations.** Actions are mocked. The decision layer is the focus, not the execution layer.
-- **Regex-based fallback signals.** When the LLM is unavailable, the system falls back to keyword matching for action classification. This is reliable for binary checks (policy, ambiguity) but fragile for intent understanding. At scale, I'd replace this with embeddings or a lightweight classifier.
+- **No embeddings.** Intent classification uses a token-weighted NLP scorer (bigrams, negation detection, disambiguation penalties) rather than embeddings. This is deterministic and inspectable — good for a prototype. At scale, embeddings would handle edge cases better.
 
 ---
 
@@ -97,7 +98,7 @@ Plus `confidence` (0-1) and `confidence_factors` — the system's self-assessmen
 
 | Role | Who | Why |
 |------|-----|-----|
-| **Classify intent** | LLM | Understanding natural language is what LLMs do best |
+| **Classify intent** | Code (NLP) + LLM | Code scores all action types via token-weighted NLP; LLM handles ambiguous cases |
 | **Assess contextual risk** | LLM | Risk depends on full conversation context, not just keywords |
 | **Recommend decision** | LLM | Nuanced judgment weighing multiple factors |
 | **Produce reasoning chain** | LLM | Step-by-step explanation visible in UI |
@@ -105,7 +106,7 @@ Plus `confidence` (0-1) and `confidence_factors` — the system's self-assessmen
 | **Detect missing info** | Code (always) | Ambiguous references and missing params are objectively detectable |
 | **Track conversation lifecycle** | Code (state machine) | Deterministic state transitions, not LLM interpretation |
 | **Override unsafe LLM output** | Code (always) | Policy blocks, state machine constraints, precondition checks |
-| **Fallback when LLM fails** | Code | Regex signals provide best-effort decision when LLM is unavailable |
+| **Fallback when LLM fails** | Code (NLP + signals) | NLP classifier + deterministic signals provide full decision without LLM |
 
 **What the model decides:** The LLM recommends one of the 5 decisions with a rationale and step-by-step reasoning. It sees the computed signals, conversation state, and full history.
 
@@ -173,7 +174,7 @@ For high-risk actions (large payments, mass emails): approval chains, not just u
 - User feedback loop ("was this the right call?")
 
 **Month 3-4: Intelligence**
-- Replace keyword matching with embeddings for semantic conflict detection
+- Add embedding-based semantic similarity alongside the NLP token scorer for edge cases
 - Multi-turn clarification — follow up if first question doesn't resolve ambiguity
 - Precondition resolution via external signals (check if legal actually replied in email)
 - Learning from user corrections to adjust thresholds
@@ -190,11 +191,11 @@ For high-risk actions (large payments, mass emails): approval chains, not just u
 - **Database** — Decision logging needs persistence. In-memory is fine for a prototype.
 - **Real integrations** — The decision layer is the interesting problem, not the execution layer.
 - **Streaming** — Would improve perceived latency. Adds complexity without demonstrating judgment.
-- **Embeddings** — Keyword matching is deterministic and inspectable for a prototype. At scale, I'd switch to semantic similarity.
+- **Embeddings** — The NLP classifier is deterministic and inspectable. At scale, I'd add semantic similarity for edge cases the token scorer misses.
 
 ## Deployment
 
-### Vercel (Recommended)
+### Vercel
 
 1. Push to GitHub
 2. Import at [vercel.com/new](https://vercel.com/new)
