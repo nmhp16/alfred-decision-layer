@@ -1,6 +1,5 @@
 import { ScenarioInput, ComputedSignals, Precondition } from "./schema";
-
-// ── Action type classification ─────────────────────────────────────
+import { detectActionType } from "./intent-classifier";
 
 const ACTION_TYPES: Record<string, { irreversible: boolean; externalFacing: boolean; requiredParams: string[] }> = {
   send_email: { irreversible: true, externalFacing: true, requiredParams: ["recipient", "subject"] },
@@ -36,8 +35,6 @@ const EXTERNAL_INDICATORS = [
   "outside", "third.party", "@", "contractor",
 ];
 
-// ── Precondition patterns ─────────────────────────────────────────
-// Matches "until X reviews Y", "after X approves", "once X is done", "when X confirms"
 const PRECONDITION_PATTERNS = [
   /until\s+(.+?)\s+review/i,
   /until\s+(.+?)\s+approv/i,
@@ -50,7 +47,6 @@ const PRECONDITION_PATTERNS = [
   /pending\s+(.+?)(?:\s+review|\s+approval)?$/i,
 ];
 
-// Patterns that indicate a precondition was resolved
 const RESOLUTION_PATTERNS = [
   /(?:legal|review|approval)\s+(?:is\s+)?(?:done|complete|cleared|approved|finished|good)/i,
   /(?:got|received)\s+(?:the\s+)?(?:approval|sign.off|green.light)/i,
@@ -77,52 +73,10 @@ function isExternalContext(action: string, context: string): boolean {
   return EXTERNAL_INDICATORS.some((ind) => combined.includes(ind));
 }
 
-// ── Detect action type from text ───────────────────────────────────
-
-// Match quality: how confident are we in the action type detection?
-// "strong" = multiple keywords matched or very specific pattern
-// "weak" = single generic keyword, could be misclassified
-// "none" = no match at all
-interface ActionDetection {
-  type: string;
-  matchQuality: "strong" | "weak" | "none";
-}
-
-function detectActionType(action: string): ActionDetection {
-  const a = action.toLowerCase();
-
-  // Strong matches — multiple specific keywords
-  if (/(?:complete|mark.*done|finish).*reminder|(?:mark|complete).*reminder.*(?:done|completed)|reminder.*(?:completed|done|finished)/i.test(a)) return { type: "complete_reminder", matchQuality: "strong" };
-  if (/forward.*(?:email|message|to\s)/i.test(a)) return { type: "forward_email", matchQuality: "strong" };
-  if (/reply.*(?:email|to\s|message)/i.test(a)) return { type: "reply_email", matchQuality: "strong" };
-  if (/send.*(?:email|message)/i.test(a)) return { type: "send_email", matchQuality: "strong" };
-  if (/(?:send|email).*draft/i.test(a)) return { type: "send_email", matchQuality: "strong" };
-  if (/reschedule.*(?:meeting|call|event)/i.test(a)) return { type: "reschedule_meeting", matchQuality: "strong" };
-  if (/cancel.*meeting/i.test(a)) return { type: "cancel_meeting", matchQuality: "strong" };
-  if (/move.*(?:meeting|event|standup)/i.test(a)) return { type: "move_calendar_event", matchQuality: "strong" };
-  if (/(?:schedule|set).*(?:meeting|call)/i.test(a)) return { type: "schedule_meeting", matchQuality: "strong" };
-  if (/(?:set|create).*reminder/i.test(a)) return { type: "set_reminder", matchQuality: "strong" };
-
-  // Weak matches — single keyword, could be wrong context
-  if (/\bforward\b/i.test(a)) return { type: "forward_email", matchQuality: "weak" };
-  if (/\breply\b/i.test(a)) return { type: "reply_email", matchQuality: "weak" };
-  if (/\bsend\b/i.test(a)) return { type: "send_email", matchQuality: "weak" };
-  if (/\breschedule\b/i.test(a)) return { type: "reschedule_meeting", matchQuality: "weak" };
-  if (/\bschedule\b/i.test(a)) return { type: "schedule_meeting", matchQuality: "weak" };
-  if (/\bremind/i.test(a)) return { type: "set_reminder", matchQuality: "weak" };
-  if (/\bdraft\b/i.test(a)) return { type: "draft_email", matchQuality: "weak" };
-  if (/\bcomplete\b|\bmark\b|\bdone\b/i.test(a)) return { type: "complete_reminder", matchQuality: "weak" };
-
-  return { type: "unknown", matchQuality: "none" };
-}
-
-// ── Timestamp parsing ──────────────────────────────────────────────
-
 function parseTimestamp(ts: string | undefined): Date | null {
   if (!ts) return null;
   const d = new Date(ts);
   if (isNaN(d.getTime())) {
-    // Try common formats like "2024-01-15 09:00"
     const match = ts.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
     if (match) return new Date(`${match[1]}T${match[2]}:00`);
     return null;
@@ -133,8 +87,6 @@ function parseTimestamp(ts: string | undefined): Date | null {
 function minutesBetween(a: Date, b: Date): number {
   return Math.abs(a.getTime() - b.getTime()) / 60000;
 }
-
-// ── Main signal computation ────────────────────────────────────────
 
 export function computeSignals(input: ScenarioInput): ComputedSignals {
   const detection = detectActionType(input.action);
@@ -147,10 +99,8 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     ...input.conversationHistory.map((m) => m.content),
   ].join(" ");
 
-  // Intent resolution
   const intent_resolved = actionType !== "unknown" && input.action.length > 5;
 
-  // Entity resolution
   const ambiguousPatterns = [
     /\bthe meeting\b/i, /\bthe draft\b/i, /\bthe email\b/i,
     /\bthat one\b/i, /\bthe event\b/i, /\bwhich one\b/i,
@@ -160,7 +110,6 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   const multipleEntitiesMentioned = /multiple|several|3\s+meetings/i.test(allText);
   const entity_resolved = !hasAmbiguousRef && !multipleEntitiesMentioned;
 
-  // Missing required params
   const missing_required_params: string[] = [];
   if (actionConfig) {
     for (const param of actionConfig.requiredParams) {
@@ -180,12 +129,9 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     }
   }
 
-  // ── Temporal analysis ────────────────────────────────────────────
-  // Find the "now" reference point (latest message timestamp or current time)
   const lastMsg = input.conversationHistory[input.conversationHistory.length - 1];
   const now = parseTimestamp(lastMsg?.timestamp) || new Date();
 
-  // Find most recent hold and approval messages with timestamps
   const holdMessages = input.conversationHistory.filter(
     (m) => m.role === "user" && HOLD_PATTERNS.some((p) => p.test(m.content))
   );
@@ -197,7 +143,6 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   const has_conflicting_prior_instruction =
     holdMessages.length > 0 && approvalMessages.length > 0;
 
-  // Temporal: how recently did hold/approval happen?
   let hold_recency_minutes: number | null = null;
   if (holdMessages.length > 0) {
     const lastHold = holdMessages[holdMessages.length - 1];
@@ -212,7 +157,6 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     if (approvalTime) approval_recency_minutes = Math.round(minutesBetween(now, approvalTime));
   }
 
-  // ── Precondition tracking ────────────────────────────────────────
   const unresolved_preconditions: Precondition[] = [];
   for (const m of input.conversationHistory) {
     if (m.role !== "user") continue;
@@ -222,7 +166,6 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
         const condition = match[1]?.trim() || match[0];
         const mTime = parseTimestamp(m.timestamp);
 
-        // Check if any later message resolved this precondition
         const mIndex = input.conversationHistory.indexOf(m);
         const laterMessages = input.conversationHistory.slice(mIndex + 1);
         const resolved = laterMessages.some(
@@ -239,13 +182,9 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     }
   }
 
-  // External facing
   const is_external_facing = actionConfig?.externalFacing ?? isExternalContext(input.action, allText);
-
-  // Irreversible
   const is_irreversible = actionConfig?.irreversible ?? false;
 
-  // Affects others
   const AFFECTS_OTHERS_PATTERNS = [
     /attendee/i, /participant/i, /team/i, /standup/i, /sync/i,
     /1:1/i, /one.on.one/i, /meeting/i, /call\b/i, /review\b/i,
@@ -255,15 +194,12 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   const affects_others = is_external_facing ||
     AFFECTS_OTHERS_PATTERNS.some((p) => p.test(allText));
 
-  // Sensitive domain
   const contains_sensitive_domain = SENSITIVE_KEYWORDS.some((kw) => kw.test(allText));
 
-  // Policy blocked
   const matchedPolicy = POLICY_BLOCKED_PATTERNS.find((p) => p.test(input.action, allText));
   const policy_blocked = !!matchedPolicy;
   const policy_reason = matchedPolicy?.reason || null;
 
-  // Risk score (0-1 weighted composite)
   let risk_score = 0;
   if (!intent_resolved) risk_score += 0.2;
   if (!entity_resolved) risk_score += 0.15;
@@ -273,17 +209,14 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   if (is_irreversible) risk_score += 0.1;
   if (contains_sensitive_domain) risk_score += 0.15;
   if (policy_blocked) risk_score += 0.3;
-  // Unresolved preconditions add risk
   const hasUnresolved = unresolved_preconditions.some((p) => !p.resolved);
   if (hasUnresolved) risk_score += 0.25;
   risk_score = Math.min(1, Math.round(risk_score * 100) / 100);
 
-  // ── Confidence scoring ───────────────────────────────────────────
-  // How confident is the deterministic engine in its own decision?
+  // Confidence: how sure the deterministic engine is about its own decision
   let confidence = 0;
   const confidence_factors: string[] = [];
 
-  // Match quality penalty — weak regex matches reduce confidence
   const matchPenalty = matchQuality === "strong" ? 0 : matchQuality === "weak" ? 0.25 : 0.5;
   if (matchQuality === "weak") {
     confidence_factors.push("Weak pattern match on action type — single keyword only, may be misclassified");
@@ -291,7 +224,6 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     confidence_factors.push("Action type unknown — no pattern matched, LLM needed for classification");
   }
 
-  // High confidence cases: signals clearly point to one answer
   if (policy_blocked) {
     confidence = 0.99;
     confidence_factors.push("Policy block is definitive — always refuse");
@@ -307,11 +239,10 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
     confidence = matchQuality === "strong" ? 0.85 : 0.85 - matchPenalty;
     confidence_factors.push("Low risk + affects others = notify");
   } else {
-    // Ambiguous zone — this is where the LLM adds value
-    confidence = 0.3; // low base
+    // Mixed signals — LLM adds value here
+    confidence = 0.3;
     confidence_factors.push("Risk signals are mixed — judgment call needed");
 
-    // Temporal context can increase or decrease confidence
     if (has_conflicting_prior_instruction && hasUnresolved) {
       confidence = 0.4;
       confidence_factors.push("Conflicting instructions + unresolved precondition → likely confirm, but context matters");
@@ -320,7 +251,6 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
       confidence_factors.push("Hold was given but no active precondition — user may have resolved it offline");
     }
 
-    // Fresh approval with stale hold increases confidence in approval
     if (hold_recency_minutes !== null && approval_recency_minutes !== null) {
       if (approval_recency_minutes < hold_recency_minutes) {
         confidence += 0.1;
@@ -331,7 +261,6 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
       }
     }
 
-    // Very high risk is clearer
     if (risk_score >= 0.6) {
       confidence = Math.max(confidence, 0.75);
       confidence_factors.push(`High risk score (${risk_score}) makes confirm more certain`);

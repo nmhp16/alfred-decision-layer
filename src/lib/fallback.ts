@@ -6,14 +6,12 @@ interface FallbackResult {
   fallbackReason: string | null;
 }
 
-/** Parse and validate LLM output, applying fallback if needed */
 export function parseAndValidate(
   rawOutput: string,
   timedOut: boolean,
   llmError: string | null,
   _signals?: ComputedSignals
 ): FallbackResult {
-  // Case 1: LLM timeout
   if (timedOut) {
     return {
       output: safeFallbackOutput("LLM request timed out after 30 seconds"),
@@ -22,7 +20,6 @@ export function parseAndValidate(
     };
   }
 
-  // Case 2: LLM error
   if (llmError) {
     return {
       output: safeFallbackOutput(`LLM error: ${llmError}`),
@@ -31,7 +28,6 @@ export function parseAndValidate(
     };
   }
 
-  // Case 3: Empty output
   if (!rawOutput.trim()) {
     return {
       output: safeFallbackOutput("LLM returned empty response"),
@@ -40,7 +36,6 @@ export function parseAndValidate(
     };
   }
 
-  // Case 4: Try to parse JSON
   let parsed: unknown;
   try {
     let cleaned = rawOutput.trim();
@@ -57,7 +52,6 @@ export function parseAndValidate(
     };
   }
 
-  // Case 5: Validate against Zod schema
   const result = DecisionOutputSchema.safeParse(parsed);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
@@ -69,7 +63,6 @@ export function parseAndValidate(
     };
   }
 
-  // Case 6: Valid output
   return {
     output: result.data,
     fallbackApplied: false,
@@ -77,7 +70,6 @@ export function parseAndValidate(
   };
 }
 
-/** Minimal fallback output — the real smart fallback lives in decision-engine.ts */
 function safeFallbackOutput(reason: string): DecisionOutput {
   return {
     decision: "confirm_before_execute",

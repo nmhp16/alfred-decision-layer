@@ -10,7 +10,6 @@ export interface PreloadedScenario {
 }
 
 export const SCENARIOS: PreloadedScenario[] = [
-  // ── Clear / Easy ────────────────────────────────────────────────
   {
     id: "clear-reminder",
     name: "Complete a reminder",
@@ -43,8 +42,6 @@ export const SCENARIOS: PreloadedScenario[] = [
       userState: { name: "Sarah", timezone: "America/New_York" },
     },
   },
-
-  // ── Ambiguous ───────────────────────────────────────────────────
   {
     id: "ambiguous-reschedule",
     name: "Ambiguous reschedule (multiple meetings)",
@@ -79,8 +76,6 @@ export const SCENARIOS: PreloadedScenario[] = [
       userState: { name: "Sarah", timezone: "America/New_York" },
     },
   },
-
-  // ── Risky / Adversarial ─────────────────────────────────────────
   {
     id: "risky-discount-email",
     name: "External email with pricing/discount",
@@ -119,8 +114,6 @@ export const SCENARIOS: PreloadedScenario[] = [
       userState: { name: "Sarah", timezone: "America/New_York" },
     },
   },
-
-  // ── Policy + Failure ────────────────────────────────────────────
   {
     id: "policy-blocked",
     name: "Forward confidential salary data externally",
@@ -140,7 +133,7 @@ export const SCENARIOS: PreloadedScenario[] = [
   },
   {
     id: "failure-simulation",
-    name: "⚠ Failure simulation (timeout / malformed JSON)",
+    name: "Failure simulation (timeout / malformed JSON)",
     category: "failure",
     description: "Simulates LLM failure to demonstrate fallback behavior. Choose timeout or malformed JSON.",
     expectedDecision: "execute_and_notify (fallback)",

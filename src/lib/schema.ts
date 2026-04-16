@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-// ── Model output schema ────────────────────────────────────────────
 export const DecisionEnum = z.enum([
   "execute_silently",
   "execute_and_notify",
@@ -27,7 +26,6 @@ export const DecisionOutputSchema = z.object({
 
 export type DecisionOutput = z.infer<typeof DecisionOutputSchema>;
 
-// ── Conversation message ───────────────────────────────────────────
 export const MessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
@@ -36,7 +34,6 @@ export const MessageSchema = z.object({
 
 export type Message = z.infer<typeof MessageSchema>;
 
-// ── Scenario input ─────────────────────────────────────────────────
 export const ScenarioInputSchema = z.object({
   action: z.string().min(1, "Action description is required"),
   latestUserMessage: z.string(),
@@ -53,15 +50,13 @@ export const ScenarioInputSchema = z.object({
 
 export type ScenarioInput = z.infer<typeof ScenarioInputSchema>;
 
-// ── Unresolved precondition ───────────────────────────────────────
 export interface Precondition {
-  condition: string;       // e.g., "legal reviews pricing language"
-  sourceMessage: string;   // the message that set the precondition
-  resolved: boolean;       // whether a subsequent message resolved it
-  ageMinutes: number | null; // how old is this precondition
+  condition: string;
+  sourceMessage: string;
+  resolved: boolean;
+  ageMinutes: number | null;
 }
 
-// ── Computed signals ───────────────────────────────────────────────
 export interface ComputedSignals {
   intent_resolved: boolean;
   entity_resolved: boolean;
@@ -75,25 +70,18 @@ export interface ComputedSignals {
   risk_score: number;
   policy_blocked: boolean;
   policy_reason: string | null;
-  // Temporal signals
-  hold_recency_minutes: number | null;    // how recently did the user say "hold off"
-  approval_recency_minutes: number | null; // how recently did the user approve
-  // Precondition tracking
+  hold_recency_minutes: number | null;
+  approval_recency_minutes: number | null;
   unresolved_preconditions: Precondition[];
-  // Confidence
-  confidence: number;         // 0-1, how confident the deterministic engine is
-  confidence_factors: string[]; // what drove the confidence up or down
+  confidence: number;
+  confidence_factors: string[];
 }
 
-// ── Decision source ───────────────────────────────────────────────
 export type DecisionSource =
-  | "deterministic"   // code decided, LLM not called
-  | "llm"             // LLM decided (ambiguous case)
-  | "llm_overridden"  // LLM was called but code overrode it
-  | "fallback";       // LLM failed, rule-based fallback
-
-// ── Imports for analysis types ────────────────────────────────────
-// These are defined in their own modules but referenced in the response
+  | "deterministic"
+  | "llm"
+  | "llm_overridden"
+  | "fallback";
 
 export interface CounterfactualResult {
   id: string;
@@ -134,7 +122,6 @@ export interface ConversationState {
   finalInsight: string;
 }
 
-// ── Full API response ──────────────────────────────────────────────
 export interface DecisionResponse {
   input: ScenarioInput;
   signals: ComputedSignals;
@@ -146,7 +133,6 @@ export interface DecisionResponse {
   fallbackReason: string | null;
   validationStatus: "valid" | "fallback_used";
   latencyMs: number;
-  // Deep analysis
   conversationState: ConversationState;
   reconstructedAction: ReconstructedActionResult;
   counterfactuals: CounterfactualResult[];

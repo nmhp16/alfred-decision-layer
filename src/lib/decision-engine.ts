@@ -1,32 +1,15 @@
 import { DecisionOutput, ComputedSignals, DecisionSource, ConversationState } from "./schema";
 
-// ── Confidence threshold ──────────────────────────────────────────
-// Only skip the LLM for things code can RELIABLY detect:
-// - Policy blocks (keyword matching IS reliable for binary policy rules)
-// - Missing info (ambiguous entities are objectively detectable)
-// Everything else goes to the LLM. Regex can't reliably classify
-// intent, risk, or who's affected for novel user messages.
 const CONFIDENCE_THRESHOLD = 0.97;
 
 export interface DeterministicResult {
   decision: DecisionOutput;
   source: DecisionSource;
-  shouldCallLLM: boolean; // false = deterministic is confident, skip LLM
+  shouldCallLLM: boolean;
 }
 
-/**
- * The deterministic decision engine.
- *
- * This is the core of the system. It evaluates signals in strict order
- * and decides whether it's confident enough to act, or whether the LLM
- * should be consulted for nuanced judgment.
- *
- * Key insight: the LLM should only handle cases where signals are genuinely
- * mixed and context-dependent reasoning is needed. Clear cases (policy block,
- * missing info, low-risk actions) don't need a $0.01 LLM call.
- */
 export function deterministicDecision(signals: ComputedSignals): DeterministicResult {
-  // ── Rule 1: Policy block → refuse (always, no LLM needed) ────
+  // Rule 1: Policy block → refuse
   if (signals.policy_blocked) {
     return {
       decision: {
@@ -44,7 +27,7 @@ export function deterministicDecision(signals: ComputedSignals): DeterministicRe
     };
   }
 
-  // ── Rule 2: Missing info → clarify (always, no LLM needed) ───
+  // Rule 2: Missing info → clarify
   const clarifyReasons: string[] = [];
   if (!signals.intent_resolved) clarifyReasons.push("intent is unclear");
   if (!signals.entity_resolved) clarifyReasons.push("referenced entity is ambiguous");
@@ -61,7 +44,7 @@ export function deterministicDecision(signals: ComputedSignals): DeterministicRe
         risk_level: "medium",
         notes: [
           "Deterministic: missing information is objectively detectable",
-          "Clarification comes before risk assessment (spec rule 2 > rule 3)",
+          "Clarification comes before risk assessment (rule 2 > rule 3)",
         ],
       },
       source: "deterministic",
@@ -69,12 +52,8 @@ export function deterministicDecision(signals: ComputedSignals): DeterministicRe
     };
   }
 
-  // ── Rule 3-5: Risk-based decisions ────────────────────────────
-  // This is where confidence matters. Clear cases are handled deterministically.
-  // Ambiguous cases (mixed signals) are deferred to the LLM.
-
+  // Rules 3-5: Risk-based decisions
   if (signals.confidence >= CONFIDENCE_THRESHOLD) {
-    // High confidence — deterministic engine decides
     return {
       decision: makeRiskDecision(signals),
       source: "deterministic",
@@ -82,23 +61,18 @@ export function deterministicDecision(signals: ComputedSignals): DeterministicRe
     };
   }
 
-  // Low confidence — LLM should weigh in, but we still have a fallback
+  // Low confidence → LLM should weigh in, deterministic result is fallback
   return {
-    decision: makeRiskDecision(signals), // used as fallback if LLM fails
+    decision: makeRiskDecision(signals),
     source: "deterministic",
     shouldCallLLM: true,
   };
 }
 
-/**
- * Given fully-resolved signals (intent + entity are clear), decide
- * based on risk profile. Used both as primary decision (high confidence)
- * and as fallback (low confidence, LLM unavailable).
- */
 function makeRiskDecision(signals: ComputedSignals): DecisionOutput {
   const hasUnresolved = signals.unresolved_preconditions.some((p) => !p.resolved);
 
-  // Unresolved preconditions with conflicting instructions → always confirm
+  // Unresolved preconditions + conflicting instructions → always confirm
   if (hasUnresolved && signals.has_conflicting_prior_instruction) {
     const preconditions = signals.unresolved_preconditions
       .filter((p) => !p.resolved)
@@ -116,7 +90,7 @@ function makeRiskDecision(signals: ComputedSignals): DecisionOutput {
     };
   }
 
-  // Conflicting instructions without preconditions — still confirm but note temporal context
+  // Conflicting instructions without preconditions
   if (signals.has_conflicting_prior_instruction) {
     return {
       decision: "confirm_before_execute",
@@ -165,16 +139,13 @@ function makeRiskDecision(signals: ComputedSignals): DecisionOutput {
   };
 }
 
-/**
- * After getting LLM output, check if the code should override it.
- * The code overrides when signals are definitive and the LLM disagrees.
- */
+// Check if code should override the LLM's decision based on definitive signals.
 export function maybeOverrideLLM(
   llmDecision: DecisionOutput,
   signals: ComputedSignals,
   conversationState?: ConversationState
 ): { decision: DecisionOutput; overridden: boolean; reason: string | null } {
-  // Override 1: LLM says execute but policy is blocked
+  // Policy blocked but LLM says execute
   if (signals.policy_blocked && llmDecision.decision !== "refuse_or_escalate") {
     return {
       decision: {
@@ -188,7 +159,7 @@ export function maybeOverrideLLM(
     };
   }
 
-  // Override 2: LLM says execute silently but action affects others
+  // LLM says execute silently but action affects others
   if (signals.affects_others && llmDecision.decision === "execute_silently") {
     return {
       decision: {
@@ -201,7 +172,7 @@ export function maybeOverrideLLM(
     };
   }
 
-  // Override 3: LLM says execute but there are unresolved preconditions
+  // LLM says execute but there are unresolved preconditions
   const hasUnresolved = signals.unresolved_preconditions.some((p) => !p.resolved);
   if (hasUnresolved && (llmDecision.decision === "execute_silently" || llmDecision.decision === "execute_and_notify")) {
     const preconditions = signals.unresolved_preconditions.filter((p) => !p.resolved).map((p) => p.condition);
@@ -217,7 +188,7 @@ export function maybeOverrideLLM(
     };
   }
 
-  // Override 4: LLM says confirm/execute but info is missing (shouldn't happen, but safety net)
+  // LLM tries to act on incomplete information
   if (!signals.entity_resolved || !signals.intent_resolved || signals.missing_required_params.length > 0) {
     if (llmDecision.decision !== "ask_clarifying_question" && llmDecision.decision !== "refuse_or_escalate") {
       return {
@@ -233,7 +204,7 @@ export function maybeOverrideLLM(
     }
   }
 
-  // Override 5: State machine says HELD — cannot execute
+  // State machine says HELD — cannot execute
   if (conversationState?.currentState === "HELD" &&
     (llmDecision.decision === "execute_silently" || llmDecision.decision === "execute_and_notify")) {
     return {
@@ -248,7 +219,7 @@ export function maybeOverrideLLM(
     };
   }
 
-  // Override 6: State machine says PENDING_RELEASE — condition unresolved, must confirm
+  // State machine says PENDING_RELEASE — condition unresolved
   if (conversationState?.currentState === "PENDING_RELEASE" &&
     (llmDecision.decision === "execute_silently" || llmDecision.decision === "execute_and_notify")) {
     return {
@@ -263,7 +234,7 @@ export function maybeOverrideLLM(
     };
   }
 
-  // Override 7: State machine says CONDITION_SET — action is blocked by condition
+  // State machine says CONDITION_SET — action blocked by condition
   if (conversationState?.currentState === "CONDITION_SET" &&
     (llmDecision.decision === "execute_silently" || llmDecision.decision === "execute_and_notify")) {
     return {
@@ -278,11 +249,21 @@ export function maybeOverrideLLM(
     };
   }
 
-  // No override needed
+  // Safety bias — non-trivial risk should notify, not execute silently
+  if (llmDecision.decision === "execute_silently" && signals.risk_score > 0) {
+    return {
+      decision: {
+        ...llmDecision,
+        decision: "execute_and_notify",
+        rationale: `[Safety bias] Risk score is ${signals.risk_score} — notifying user even though risk is low. ${llmDecision.rationale}`,
+      },
+      overridden: true,
+      reason: `Safety bias: risk_score ${signals.risk_score} > 0, upgraded from silent to notify`,
+    };
+  }
+
   return { decision: llmDecision, overridden: false, reason: null };
 }
-
-// ── Helpers ────────────────────────────────────────────────────────
 
 function generateClarifyingQuestion(signals: ComputedSignals): string {
   if (!signals.intent_resolved) {

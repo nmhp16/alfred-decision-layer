@@ -49,8 +49,6 @@ function SignalRow({ label, value, warn }: { label: string; value: string; warn?
   );
 }
 
-// ── State Machine Visualization ───────────────────────────────────
-
 function StateMachineView({ state }: { state: ConversationState }) {
   const STATE_COLORS: Record<string, string> = {
     IDLE: "bg-gray-200 text-gray-700",

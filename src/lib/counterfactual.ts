@@ -2,22 +2,16 @@ import { ScenarioInput, ComputedSignals } from "./schema";
 import { computeSignals } from "./signals";
 import { deterministicDecision } from "./decision-engine";
 
-// ── Counterfactual analysis ───────────────────────────────────────
-// "What would change if X were different?"
-// Re-runs the decision pipeline with modified inputs to show which
-// factors actually drive the decision. This proves the system isn't
-// just classifying — it understands causation.
-
 export interface Counterfactual {
   id: string;
-  label: string;            // human-readable description of what changed
-  modification: string;     // what was modified
+  label: string;
+  modification: string;
   originalDecision: string;
   newDecision: string;
-  changed: boolean;         // did the decision actually change?
+  changed: boolean;
   originalConfidence: number;
   newConfidence: number;
-  insight: string;          // what this tells us
+  insight: string;
 }
 
 export function runCounterfactuals(input: ScenarioInput, originalSignals: ComputedSignals): Counterfactual[] {
@@ -25,7 +19,7 @@ export function runCounterfactuals(input: ScenarioInput, originalSignals: Comput
   const originalDecision = originalResult.decision.decision;
   const counterfactuals: Counterfactual[] = [];
 
-  // 1. Remove all hold/wait messages
+  // Remove all hold/wait messages
   const holdPatterns = [/hold\s+off/i, /wait/i, /don'?t\s+send/i, /pause/i, /stop/i, /not\s+yet/i, /until\s+/i];
   const hasHoldMessages = input.conversationHistory.some(
     (m) => m.role === "user" && holdPatterns.some((p) => p.test(m.content))
@@ -54,7 +48,7 @@ export function runCounterfactuals(input: ScenarioInput, originalSignals: Comput
     });
   }
 
-  // 2. Remove all approval messages
+  // Remove all approval messages
   const approvalPatterns = [/yes/i, /yep/i, /go\s+ahead/i, /send\s+it/i, /do\s+it/i, /approve/i, /looks\s+good/i];
   const hasApprovalMessages = input.conversationHistory.some(
     (m) => m.role === "user" && approvalPatterns.some((p) => p.test(m.content))
@@ -83,7 +77,7 @@ export function runCounterfactuals(input: ScenarioInput, originalSignals: Comput
     });
   }
 
-  // 3. Make it internal (remove external indicators)
+  // Make it internal (remove external indicators)
   if (originalSignals.is_external_facing) {
     const externalTerms = /external|partner|client|vendor|recruiter|contractor|@\w+\.\w+/gi;
     const modifiedInput = {
@@ -111,7 +105,7 @@ export function runCounterfactuals(input: ScenarioInput, originalSignals: Comput
     });
   }
 
-  // 4. Remove sensitive content
+  // Remove sensitive content
   if (originalSignals.contains_sensitive_domain) {
     const sensitiveTerms = /\b(?:pricing|discount|salary|compensation|confidential|nda|legal|contract|restricted|proprietary|personal)\b/gi;
     const modifiedInput = {
@@ -140,7 +134,7 @@ export function runCounterfactuals(input: ScenarioInput, originalSignals: Comput
     });
   }
 
-  // 5. Add more context (resolve ambiguity)
+  // Resolve ambiguity
   if (!originalSignals.entity_resolved) {
     const modifiedInput = {
       ...input,
@@ -164,7 +158,7 @@ export function runCounterfactuals(input: ScenarioInput, originalSignals: Comput
     });
   }
 
-  // 6. Remove conversation history entirely (one-shot)
+  // Remove conversation history entirely (one-shot)
   if (input.conversationHistory.length > 0) {
     const modifiedInput = {
       ...input,

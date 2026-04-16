@@ -1,7 +1,5 @@
 import { ScenarioInput, ComputedSignals } from "./schema";
 
-// ── Action lifecycle states ────────────────────────────────────────
-
 export type ActionState =
   | "IDLE"
   | "PROPOSED"
@@ -15,17 +13,15 @@ export type ActionState =
   | "BLOCKED"
   | "READY";
 
-// ── Each step in the incremental analysis ─────────────────────────
-
 export interface StateStep {
-  messageIndex: number;       // which message triggered this step (-1 = initial, -2 = latest user msg, -3 = final eval)
+  messageIndex: number;
   role: "user" | "assistant" | "system";
-  message: string;            // the message content (truncated)
+  message: string;
   timestamp: string | null;
   previousState: ActionState;
   newState: ActionState;
-  changed: boolean;           // did the state change?
-  understanding: string;      // what the system understands at this point
+  changed: boolean;
+  understanding: string;
 }
 
 export interface ConversationStateResult {
@@ -34,8 +30,6 @@ export interface ConversationStateResult {
   stateHistory: ActionState[];
   finalInsight: string;
 }
-
-// ── Patterns ──────────────────────────────────────────────────────
 
 const PROPOSE_PATTERNS = [
   /(?:can you|could you|please|help me)\s+(?:send|draft|schedule|reschedule|cancel|move|forward|reply)/i,
@@ -77,8 +71,6 @@ const CONDITION_MET_PATTERNS = [
   /all\s+(?:clear|good|set)/i, /good\s+to\s+go/i,
 ];
 
-// ── State machine with incremental understanding ──────────────────
-
 export function analyzeConversationState(input: ScenarioInput, signals?: ComputedSignals): ConversationStateResult {
   let currentState = "IDLE" as ActionState;
   const steps: StateStep[] = [];
@@ -87,7 +79,6 @@ export function analyzeConversationState(input: ScenarioInput, signals?: Compute
   let conditionWasResolved = false;
   let conditionText = "";
   let hadHold = false;
-  let actionDescription = input.action;
 
   function transitionTo(
     to: ActionState,
@@ -115,100 +106,88 @@ export function analyzeConversationState(input: ScenarioInput, signals?: Compute
     });
   }
 
-  // ── Process each message incrementally ──────────────────────────
-
   for (let i = 0; i < input.conversationHistory.length; i++) {
     const msg = input.conversationHistory[i];
     const content = msg.content;
     const ts = msg.timestamp || null;
 
     if (msg.role === "user") {
-      // Condition met
       if (CONDITION_MET_PATTERNS.some((p) => p.test(content)) && conditionWasSet && !conditionWasResolved) {
         conditionWasResolved = true;
         transitionTo("CONDITION_MET", i, "user", content, ts,
-          `Precondition resolved: "${conditionText}" has been confirmed as met. Action can now proceed if user approves.`);
+          `Precondition resolved: "${conditionText}" confirmed met.`);
         continue;
       }
 
-      // Approval
       if (APPROVAL_PATTERNS.some((p) => p.test(content))) {
         if (currentState === "CONDITION_SET") {
           transitionTo("PENDING_RELEASE", i, "user", content, ts,
-            `User wants to proceed, but the precondition "${conditionText}" was never confirmed as resolved. This is risky — user may be jumping ahead.`);
+            `User wants to proceed, but "${conditionText}" was never confirmed resolved.`);
         } else if (currentState === "HELD" && conditionWasSet && !conditionWasResolved) {
           transitionTo("PENDING_RELEASE", i, "user", content, ts,
-            `User wants to proceed after a hold, but the condition "${conditionText}" is still unresolved.`);
+            `User wants to proceed after hold, but "${conditionText}" is still unresolved.`);
         } else if (currentState === "HELD") {
           transitionTo("APPROVED", i, "user", content, ts,
-            `User lifted the hold and approved. The hold had no precondition, so approval is straightforward.`);
+            `User lifted the hold. No precondition was set.`);
         } else if (currentState === "CONDITION_MET") {
           transitionTo("APPROVED", i, "user", content, ts,
-            `User approved after the precondition was confirmed met. All clear from a conversation standpoint.`);
+            `User approved after precondition was confirmed met.`);
         } else if (currentState === "AWAITING_APPROVAL" || currentState === "DRAFTED") {
           transitionTo("APPROVED", i, "user", content, ts,
-            `User approved the proposed action. No holds or conditions — intent is clear.`);
+            `User approved. No holds or conditions.`);
         } else if (currentState === "PENDING_RELEASE") {
-          // Stay — don't double advance
           transitionTo("PENDING_RELEASE", i, "user", content, ts,
-            `User confirmed again, but the unresolved condition still blocks advancement. Repeated approval doesn't resolve the condition.`);
+            `Repeated approval doesn't resolve the unresolved condition.`);
         }
         continue;
       }
 
-      // Hold (with or without condition)
       if (HOLD_PATTERNS.some((p) => p.test(content))) {
         hadHold = true;
         if (CONDITION_PATTERNS.some((p) => p.test(content))) {
           conditionWasSet = true;
-          // Extract condition text
           const condMatch = content.match(/until\s+(.+?)(?:\.|;|$)/i)
             || content.match(/after\s+(.+?)(?:\.|;|$)/i);
           conditionText = condMatch?.[1]?.trim() || "unspecified condition";
           transitionTo("CONDITION_SET", i, "user", content, ts,
-            `Action is on HOLD with a precondition: "${conditionText}". The action cannot proceed until this condition is confirmed as met.`);
+            `Hold with precondition: "${conditionText}".`);
         } else {
           transitionTo("HELD", i, "user", content, ts,
-            `User explicitly asked to pause/hold. Action is frozen until user lifts the hold.`);
+            `User explicitly paused the action.`);
         }
         continue;
       }
 
-      // Condition without hold
       if (CONDITION_PATTERNS.some((p) => p.test(content))) {
         conditionWasSet = true;
         const condMatch = content.match(/until\s+(.+?)(?:\.|;|$)/i)
           || content.match(/after\s+(.+?)(?:\.|;|$)/i);
         conditionText = condMatch?.[1]?.trim() || "unspecified condition";
         transitionTo("CONDITION_SET", i, "user", content, ts,
-          `Precondition set: "${conditionText}". Action is gated on this being resolved.`);
+          `Precondition set: "${conditionText}".`);
         continue;
       }
 
-      // First user message — proposal
       if (currentState === "IDLE" && (PROPOSE_PATTERNS.some((p) => p.test(content)) || content.length > 10)) {
-        actionDescription = content;
         transitionTo("PROPOSED", i, "user", content, ts,
-          `User proposed an action: "${content.slice(0, 80)}". Awaiting assistant response.`);
+          `User proposed an action.`);
         continue;
       }
     } else {
-      // Assistant messages
       if (DRAFT_PATTERNS.some((p) => p.test(content))) {
         transitionTo("DRAFTED", i, "assistant", content, ts,
-          `Assistant created a draft. Content is ready but not yet approved by user.`);
+          `Assistant created a draft. Not yet approved.`);
         continue;
       }
       if (ASK_CONFIRM_PATTERNS.some((p) => p.test(content))) {
         transitionTo("AWAITING_APPROVAL", i, "assistant", content, ts,
-          `Assistant is asking for confirmation before acting. Waiting for user's go-ahead.`);
+          `Assistant asking for confirmation.`);
         continue;
       }
     }
   }
 
-  // ── Process latest user message ─────────────────────────────────
-
+  // Process latest user message
   if (input.latestUserMessage) {
     const latest = input.latestUserMessage;
     const lastIdx = input.conversationHistory.length;
@@ -216,49 +195,47 @@ export function analyzeConversationState(input: ScenarioInput, signals?: Compute
     if (CONDITION_MET_PATTERNS.some((p) => p.test(latest)) && conditionWasSet && !conditionWasResolved) {
       conditionWasResolved = true;
       transitionTo("CONDITION_MET", lastIdx, "user", latest, null,
-        `Precondition "${conditionText}" resolved. Action can proceed.`);
+        `Precondition "${conditionText}" resolved.`);
     }
 
     if (APPROVAL_PATTERNS.some((p) => p.test(latest))) {
       if (currentState === "CONDITION_SET" || (currentState === "HELD" && conditionWasSet && !conditionWasResolved)) {
         transitionTo("PENDING_RELEASE", lastIdx, "user", latest, null,
-          `User wants to proceed, but "${conditionText}" was never confirmed resolved. This is the riskiest state — confirmation required.`);
+          `User wants to proceed, but "${conditionText}" was never confirmed resolved.`);
       } else if (currentState === "HELD") {
         transitionTo("APPROVED", lastIdx, "user", latest, null,
-          `User lifted the hold. No outstanding conditions.`);
+          `User lifted the hold.`);
       } else if (currentState === "CONDITION_MET") {
         transitionTo("APPROVED", lastIdx, "user", latest, null,
-          `User approved after precondition was resolved. Clear to proceed.`);
+          `Approved after precondition resolved.`);
       } else if (currentState === "AWAITING_APPROVAL" || currentState === "DRAFTED") {
         transitionTo("APPROVED", lastIdx, "user", latest, null,
-          `User approved. Intent is clear.`);
+          `User approved.`);
       } else if (currentState === "PENDING_RELEASE") {
         transitionTo("PENDING_RELEASE", lastIdx, "user", latest, null,
-          `User confirmed again, but unresolved condition still applies.`);
+          `Repeated approval, unresolved condition still applies.`);
       }
     }
   }
 
-  // ── Final evaluation — apply policy and risk checks ─────────────
-
+  // Final evaluation — apply policy and risk checks
   if (signals?.policy_blocked) {
     transitionTo("BLOCKED", -3, "system", "Policy evaluation", null,
-      `BLOCKED: This action violates policy rules. User approved in conversation, but policy overrides user intent. The action cannot proceed regardless of approval.`);
+      `BLOCKED: Policy violation. Cannot proceed regardless of approval.`);
   } else if (currentState === "APPROVED") {
     const hasConflict = signals?.has_conflicting_prior_instruction ?? false;
     const hasUnresolved = signals?.unresolved_preconditions.some((p) => !p.resolved) ?? false;
 
     if (!hasConflict && !hasUnresolved && (!hadHold || conditionWasResolved)) {
       transitionTo("READY", -3, "system", "Final risk assessment", null,
-        `All checks passed. User approved, no conflicts, no unresolved conditions, no policy violations. Action is clear to execute.`);
+        `All checks passed. Clear to execute.`);
     } else {
-      // Stay at APPROVED — add a system step explaining why not READY
       const reasons: string[] = [];
-      if (hasConflict) reasons.push("conflicting instructions detected");
+      if (hasConflict) reasons.push("conflicting instructions");
       if (hasUnresolved) reasons.push("unresolved precondition(s)");
       if (hadHold && !conditionWasResolved) reasons.push("prior hold may not be fully addressed");
       transitionTo("APPROVED", -3, "system", "Final risk assessment", null,
-        `User approved, but risk assessment flagged: ${reasons.join(", ")}. Confirmation required before executing.`);
+        `Approved but flagged: ${reasons.join(", ")}. Confirmation required.`);
     }
   }
 
