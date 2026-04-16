@@ -118,6 +118,8 @@ export default function Home() {
               <>
                 <DecisionCard
                   decision={response.parsedOutput}
+                  decisionSource={response.decisionSource}
+                  confidence={response.signals.confidence}
                   fallbackApplied={response.fallbackApplied}
                   fallbackReason={response.fallbackReason}
                   expectedDecision={selectedScenario?.expectedDecision ?? null}

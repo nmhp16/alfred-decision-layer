@@ -47,6 +47,14 @@ export const ScenarioInputSchema = z.object({
 
 export type ScenarioInput = z.infer<typeof ScenarioInputSchema>;
 
+// ── Unresolved precondition ───────────────────────────────────────
+export interface Precondition {
+  condition: string;       // e.g., "legal reviews pricing language"
+  sourceMessage: string;   // the message that set the precondition
+  resolved: boolean;       // whether a subsequent message resolved it
+  ageMinutes: number | null; // how old is this precondition
+}
+
 // ── Computed signals ───────────────────────────────────────────────
 export interface ComputedSignals {
   intent_resolved: boolean;
@@ -60,7 +68,22 @@ export interface ComputedSignals {
   contains_sensitive_domain: boolean;
   risk_score: number;
   policy_blocked: boolean;
+  // Temporal signals
+  hold_recency_minutes: number | null;    // how recently did the user say "hold off"
+  approval_recency_minutes: number | null; // how recently did the user approve
+  // Precondition tracking
+  unresolved_preconditions: Precondition[];
+  // Confidence
+  confidence: number;         // 0-1, how confident the deterministic engine is
+  confidence_factors: string[]; // what drove the confidence up or down
 }
+
+// ── Decision source ───────────────────────────────────────────────
+export type DecisionSource =
+  | "deterministic"   // code decided, LLM not called
+  | "llm"             // LLM decided (ambiguous case)
+  | "llm_overridden"  // LLM was called but code overrode it
+  | "fallback";       // LLM failed, rule-based fallback
 
 // ── Full API response ──────────────────────────────────────────────
 export interface DecisionResponse {
@@ -69,6 +92,7 @@ export interface DecisionResponse {
   prompt: string;
   rawOutput: string;
   parsedOutput: DecisionOutput;
+  decisionSource: DecisionSource;
   fallbackApplied: boolean;
   fallbackReason: string | null;
   validationStatus: "valid" | "fallback_used";

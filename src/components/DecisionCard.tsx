@@ -1,9 +1,11 @@
 "use client";
 
-import { DecisionOutput } from "@/lib/schema";
+import { DecisionOutput, DecisionSource } from "@/lib/schema";
 
 interface Props {
   decision: DecisionOutput;
+  decisionSource: DecisionSource;
+  confidence: number;
   fallbackApplied: boolean;
   fallbackReason: string | null;
   expectedDecision?: string | null;
@@ -49,12 +51,21 @@ const RISK_STYLES: Record<string, { color: string; bg: string }> = {
   high: { color: "text-red-700", bg: "bg-red-100" },
 };
 
+const SOURCE_STYLES: Record<string, { bg: string; text: string; label: string }> = {
+  deterministic: { bg: "bg-cyan-100", text: "text-cyan-800", label: "Code Decided" },
+  llm: { bg: "bg-violet-100", text: "text-violet-800", label: "LLM Decided" },
+  llm_overridden: { bg: "bg-orange-100", text: "text-orange-800", label: "LLM Overridden by Code" },
+  fallback: { bg: "bg-amber-100", text: "text-amber-800", label: "Fallback (LLM Failed)" },
+};
+
 function decisionLabel(key: string): string {
   return DECISION_STYLES[key]?.label ?? key;
 }
 
 export default function DecisionCard({
   decision,
+  decisionSource,
+  confidence,
   fallbackApplied,
   fallbackReason,
   expectedDecision,
@@ -62,12 +73,10 @@ export default function DecisionCard({
 }: Props) {
   const style = DECISION_STYLES[decision.decision] || DECISION_STYLES.confirm_before_execute;
   const riskStyle = RISK_STYLES[decision.risk_level] || RISK_STYLES.medium;
+  const sourceStyle = SOURCE_STYLES[decisionSource] || SOURCE_STYLES.deterministic;
 
-  // Check if actual matches expected (normalize: strip "(fallback)" etc.)
   const normalizedExpected = expectedDecision?.replace(/\s*\(.*\)/, "").trim();
-  const matches = normalizedExpected
-    ? decision.decision === normalizedExpected
-    : null;
+  const matches = normalizedExpected ? decision.decision === normalizedExpected : null;
 
   return (
     <div className={`rounded-xl border-2 ${style.border} ${style.bg} p-5`}>
@@ -86,15 +95,28 @@ export default function DecisionCard({
         </div>
       </div>
 
-      {/* Expected vs Actual comparison */}
+      {/* Decision source + confidence badges */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${sourceStyle.bg} ${sourceStyle.text}`}>
+          {sourceStyle.label}
+        </span>
+        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+          confidence >= 0.7 ? "bg-green-100 text-green-700" :
+          confidence >= 0.4 ? "bg-amber-100 text-amber-700" :
+          "bg-red-100 text-red-700"
+        }`}>
+          Confidence: {Math.round(confidence * 100)}%
+        </span>
+        {decisionSource === "deterministic" && (
+          <span className="text-xs text-gray-400">LLM not called</span>
+        )}
+      </div>
+
+      {/* Expected vs Actual */}
       {expectedDecision && (
-        <div
-          className={`mb-3 p-3 rounded-lg border ${
-            matches
-              ? "bg-green-50 border-green-200"
-              : "bg-orange-50 border-orange-200"
-          }`}
-        >
+        <div className={`mb-3 p-3 rounded-lg border ${
+          matches ? "bg-green-50 border-green-200" : "bg-orange-50 border-orange-200"
+        }`}>
           <div className="flex items-center gap-2 text-xs">
             <span className={matches ? "text-green-700" : "text-orange-700"}>
               {matches ? "MATCH" : "MISMATCH"}
@@ -118,9 +140,7 @@ export default function DecisionCard({
       {/* Fallback warning */}
       {fallbackApplied && (
         <div className="mb-3 p-3 bg-amber-100 border border-amber-300 rounded-lg">
-          <p className="text-xs font-medium text-amber-800">
-            Fallback Applied
-          </p>
+          <p className="text-xs font-medium text-amber-800">Fallback Applied</p>
           <p className="text-xs text-amber-700 mt-1">{fallbackReason}</p>
         </div>
       )}
