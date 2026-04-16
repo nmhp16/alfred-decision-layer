@@ -1,65 +1,143 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import ScenarioSelector from "@/components/ScenarioSelector";
+import ActionInput from "@/components/ActionInput";
+import DecisionCard from "@/components/DecisionCard";
+import DebugPanel from "@/components/DebugPanel";
+import { ScenarioInput, DecisionResponse } from "@/lib/schema";
+import { PreloadedScenario } from "@/lib/scenarios";
+
+const EMPTY_INPUT: ScenarioInput = {
+  action: "",
+  latestUserMessage: "",
+  conversationHistory: [],
+  simulateFailure: "none",
+};
 
 export default function Home() {
+  const [input, setInput] = useState<ScenarioInput>(EMPTY_INPUT);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [response, setResponse] = useState<DecisionResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSelectScenario = (scenario: PreloadedScenario) => {
+    setSelectedScenarioId(scenario.id);
+    setInput(scenario.input);
+    setResponse(null);
+    setError(null);
+  };
+
+  const handleSubmit = async () => {
+    setLoading(true);
+    setError(null);
+    setResponse(null);
+
+    try {
+      const res = await fetch("/api/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
+
+      const data: DecisionResponse = await res.json();
+      setResponse(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <main className="min-h-screen">
+      {/* Header */}
+      <header className="border-b border-gray-200 bg-white">
+        <div className="max-w-5xl mx-auto px-4 py-4">
+          <h1 className="text-xl font-bold text-gray-900">
+            alfred<span className="text-blue-600">_</span>{" "}
+            <span className="font-normal text-gray-500">Execution Decision Layer</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-sm text-gray-500 mt-1">
+            Decide when to act, confirm, clarify, or refuse — with full pipeline transparency.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left column: Input */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <ScenarioSelector onSelect={handleSelectScenario} selectedId={selectedScenarioId} />
+            </div>
+
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
+                Action & Context
+              </h2>
+              <ActionInput
+                input={input}
+                onChange={setInput}
+                onSubmit={handleSubmit}
+                loading={loading}
+              />
+            </div>
+          </div>
+
+          {/* Right column: Results */}
+          <div className="space-y-6">
+            {error && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                <p className="text-sm font-medium text-red-800">Error</p>
+                <p className="text-sm text-red-600 mt-1">{error}</p>
+              </div>
+            )}
+
+            {loading && (
+              <div className="flex items-center justify-center py-16">
+                <div className="text-center">
+                  <svg className="animate-spin h-8 w-8 text-blue-500 mx-auto mb-3" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <p className="text-sm text-gray-500">Evaluating decision...</p>
+                </div>
+              </div>
+            )}
+
+            {response && !loading && (
+              <>
+                <DecisionCard
+                  decision={response.parsedOutput}
+                  fallbackApplied={response.fallbackApplied}
+                  fallbackReason={response.fallbackReason}
+                />
+                <div className="bg-white rounded-xl border border-gray-200 p-5">
+                  <DebugPanel response={response} />
+                </div>
+              </>
+            )}
+
+            {!response && !loading && !error && (
+              <div className="flex items-center justify-center py-16">
+                <div className="text-center">
+                  <div className="text-4xl mb-3 text-gray-300">&#8593;</div>
+                  <p className="text-sm text-gray-400">
+                    Select a scenario or enter an action, then click &ldquo;Evaluate Decision&rdquo;
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
