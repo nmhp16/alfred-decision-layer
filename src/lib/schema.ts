@@ -85,6 +85,37 @@ export type DecisionSource =
   | "llm_overridden"  // LLM was called but code overrode it
   | "fallback";       // LLM failed, rule-based fallback
 
+// ── Imports for analysis types ────────────────────────────────────
+// These are defined in their own modules but referenced in the response
+
+export interface CounterfactualResult {
+  id: string;
+  label: string;
+  modification: string;
+  originalDecision: string;
+  newDecision: string;
+  changed: boolean;
+  originalConfidence: number;
+  newConfidence: number;
+  insight: string;
+}
+
+export interface ReconstructedActionResult {
+  actionType: string;
+  what: string;
+  who: string[];
+  content: string | null;
+  conditions: string[];
+  reconstructedFrom: string[];
+}
+
+export interface ConversationState {
+  currentState: string;
+  transitions: { from: string; to: string; trigger: string; messageIndex: number; timestamp: string | null }[];
+  stateHistory: string[];
+  insight: string;
+}
+
 // ── Full API response ──────────────────────────────────────────────
 export interface DecisionResponse {
   input: ScenarioInput;
@@ -97,4 +128,8 @@ export interface DecisionResponse {
   fallbackReason: string | null;
   validationStatus: "valid" | "fallback_used";
   latencyMs: number;
+  // Deep analysis
+  conversationState: ConversationState;
+  reconstructedAction: ReconstructedActionResult;
+  counterfactuals: CounterfactualResult[];
 }

@@ -33,7 +33,7 @@ const APPROVAL_PATTERNS = [
 
 const EXTERNAL_INDICATORS = [
   "external", "partner", "client", "vendor", "recruiter",
-  "outside", "third.party", "@", "acme", "contractor",
+  "outside", "third.party", "@", "contractor",
 ];
 
 // ── Precondition patterns ─────────────────────────────────────────

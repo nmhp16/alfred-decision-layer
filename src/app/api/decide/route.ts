@@ -5,12 +5,14 @@ import { buildPrompt } from "@/lib/prompt";
 import { callLLM } from "@/lib/llm";
 import { parseAndValidate } from "@/lib/fallback";
 import { deterministicDecision, maybeOverrideLLM } from "@/lib/decision-engine";
+import { analyzeConversationState } from "@/lib/state-machine";
+import { reconstructAction } from "@/lib/action-reconstruction";
+import { runCounterfactuals } from "@/lib/counterfactual";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    // Validate input
     const inputResult = ScenarioInputSchema.safeParse(body);
     if (!inputResult.success) {
       return NextResponse.json(
@@ -34,7 +36,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Step 2: Run deterministic decision engine ──────────────
+    // ── Step 2: Deep analysis (all deterministic, no LLM) ──────
+    const conversationState = analyzeConversationState(input, signals);
+    const reconstructedAction = reconstructAction(input);
+    const counterfactuals = runCounterfactuals(input, signals);
+
+    // ── Step 3: Run deterministic decision engine ──────────────
     const detResult = deterministicDecision(signals);
     let prompt = "";
     let rawOutput = "";
@@ -43,8 +50,7 @@ export async function POST(request: NextRequest) {
     let fallbackApplied = false;
     let fallbackReason: string | null = null;
 
-    // ── Step 3: Call LLM only if confidence is low ─────────────
-    // Or if a failure simulation is requested
+    // ── Step 4: Call LLM only if confidence is low ─────────────
     const needsLLM = detResult.shouldCallLLM || input.simulateFailure === "timeout" || input.simulateFailure === "malformed_json";
 
     if (needsLLM) {
@@ -52,7 +58,6 @@ export async function POST(request: NextRequest) {
         prompt = buildPrompt(input, signals);
       } catch (err) {
         console.error("Prompt build error:", err);
-        // Fall back to deterministic decision
         decisionSource = "fallback";
         fallbackApplied = true;
         fallbackReason = `Prompt build failed: ${err}`;
@@ -80,22 +85,18 @@ export async function POST(request: NextRequest) {
 
         rawOutput = llmRaw || (llmError ? `[Error: ${llmError}]` : "[Empty response]");
 
-        // Parse LLM output
         const parsed = parseAndValidate(llmRaw, timedOut, llmError, signals);
 
         if (parsed.fallbackApplied) {
-          // LLM failed — use deterministic decision as fallback
           decisionSource = "fallback";
           fallbackApplied = true;
           fallbackReason = parsed.fallbackReason;
-          // Keep the deterministic decision (detResult.decision)
           output = detResult.decision;
           output = {
             ...output,
             notes: [...output.notes, `LLM unavailable: ${parsed.fallbackReason}`],
           };
         } else {
-          // LLM succeeded — check if code needs to override
           const override = maybeOverrideLLM(parsed.output, signals);
           output = override.decision;
           if (override.overridden) {
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── Step 4: Build response with full debug info ────────────
+    // ── Step 5: Build response ─────────────────────────────────
     const latencyMs = Date.now() - startTime;
     const response: DecisionResponse = {
       input,
@@ -124,6 +125,9 @@ export async function POST(request: NextRequest) {
       fallbackReason,
       validationStatus: fallbackApplied ? "fallback_used" : "valid",
       latencyMs,
+      conversationState,
+      reconstructedAction,
+      counterfactuals,
     };
 
     return NextResponse.json(response);

@@ -143,7 +143,7 @@ export const SCENARIOS: PreloadedScenario[] = [
     name: "⚠ Failure simulation (timeout / malformed JSON)",
     category: "failure",
     description: "Simulates LLM failure to demonstrate fallback behavior. Choose timeout or malformed JSON.",
-    expectedDecision: "confirm_before_execute (fallback)",
+    expectedDecision: "execute_and_notify (fallback)",
     input: {
       action: "Send a follow-up email to the client",
       latestUserMessage: "Send the follow-up",
