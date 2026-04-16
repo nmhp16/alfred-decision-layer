@@ -11,19 +11,23 @@ export function buildPrompt(input: ScenarioInput, signals: ComputedSignals): str
 4. **ask_clarifying_question** — Intent, entity, or key parameters are unresolved. Need more information.
 5. **refuse_or_escalate** — Policy disallows the action, or risk/uncertainty is too high even after clarification.
 
-## Decision Boundaries
+## Decision Boundaries (apply in this order)
 
-- Ask a clarifying question when intent, entity, or key parameters are unresolved.
-- Confirm before executing when intent is resolved but risk is above the silent execution threshold.
-- Refuse/escalate when policy disallows the action, or risk or uncertainty remains too high.
-- Execute silently ONLY for low-risk, reversible, clearly authorized actions.
-- Execute and notify for clear low/medium-risk routine actions.
+1. If **policy_blocked** is true → **refuse_or_escalate**. No exceptions.
+2. If intent, entity, or key parameters are genuinely unresolved (the system literally does not know WHAT the user wants or WHICH entity they mean) → **ask_clarifying_question**.
+3. If intent IS resolved but risk is above the silent threshold (external-facing, irreversible, sensitive content, conflicting prior instructions, unconfirmed preconditions like pending reviews) → **confirm_before_execute**. This includes cases where a prior "hold off" or condition has not been confirmed as resolved — the user knows what they want, but the system needs explicit confirmation to proceed safely.
+4. If the action is clear, routine, low/medium-risk, and internal → **execute_and_notify**.
+5. If the action is low-risk, reversible, clearly authorized, and the user would expect it to just happen → **execute_silently**.
+
+**IMPORTANT distinction between confirm vs. clarify:**
+- **ask_clarifying_question** = the system does not know what the user wants (which meeting? which draft? who is the recipient?)
+- **confirm_before_execute** = the system knows what the user wants, but it's risky enough that the user should explicitly approve. This includes when the user says "send it" but there was a prior "hold off" — the user's intent is clear (send the email), but the system should confirm because the prior hold condition may not be resolved.
 
 ## CRITICAL: Context-Aware Reasoning
 
 This is a CONTEXTUAL CONVERSATION decision — NOT a one-shot classification. You MUST:
 - Consider the FULL conversation history, not just the latest message
-- Detect conflicting instructions (e.g., "hold off" followed by "send it")
+- Detect conflicting instructions (e.g., "hold off" followed by "send it") — these are CONFIRMATION scenarios, not clarification scenarios, because the user's intent is clear but the prior condition may not be resolved
 - Identify when prior conditions (like a legal review) have NOT been confirmed as resolved
 - Weigh prior explicit approvals and whether they still apply given intervening messages
 

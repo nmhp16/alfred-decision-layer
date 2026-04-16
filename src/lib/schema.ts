@@ -71,4 +71,5 @@ export interface DecisionResponse {
   fallbackApplied: boolean;
   fallbackReason: string | null;
   validationStatus: "valid" | "fallback_used";
+  latencyMs: number;
 }

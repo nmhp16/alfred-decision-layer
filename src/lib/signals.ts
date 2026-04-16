@@ -85,9 +85,18 @@ export function computeSignals(input: ScenarioInput): ComputedSignals {
   const intent_resolved = actionType !== "unknown" && input.action.length > 5;
 
   // Entity resolution: are referenced entities unambiguous?
-  const ambiguousTerms = ["the meeting", "the draft", "the email", "it", "that one", "the event"];
-  const hasAmbiguousRef = ambiguousTerms.some((t) => input.latestUserMessage.toLowerCase().includes(t));
-  const multipleEntitiesMentioned = /multiple|several|3\s+meetings|which\s+one/i.test(allText);
+  // Use word-boundary regex to avoid false positives (e.g., "it" inside "with")
+  const ambiguousPatterns = [
+    /\bthe meeting\b/i,
+    /\bthe draft\b/i,
+    /\bthe email\b/i,
+    /\bthat one\b/i,
+    /\bthe event\b/i,
+    /\bwhich one\b/i,
+  ];
+  const msg = input.latestUserMessage.toLowerCase();
+  const hasAmbiguousRef = ambiguousPatterns.some((p) => p.test(msg));
+  const multipleEntitiesMentioned = /multiple|several|3\s+meetings/i.test(allText);
   const entity_resolved = !hasAmbiguousRef && !multipleEntitiesMentioned;
 
   // Missing required params

@@ -6,7 +6,8 @@ A minimal full-stack prototype that decides how an AI text-message assistant sho
 
 ```bash
 npm install
-echo "ANTHROPIC_API_KEY=your-key-here" > .env.local
+cp .env.example .env.local
+# Edit .env.local and add your Gemini API key
 npm run dev
 ```
 
@@ -24,7 +25,7 @@ User Input (action + conversation context)
   Prompt Assembly (signals + context --> structured prompt)
         |
         v
-  Claude API Call (with 15s timeout)
+  Gemini 2.5 Flash API Call (with 30s timeout)
         |
         v
   Zod Validation + Safe Fallback
@@ -92,12 +93,14 @@ Key design choices:
 
 | Failure | System Behavior | Safe Default |
 |---------|-----------------|-------------|
-| **LLM timeout** (>15s) | Fallback to `confirm_before_execute` | Never silently executes on timeout |
+| **LLM timeout** (>30s) | Fallback to `confirm_before_execute` | Never silently executes on timeout |
 | **Malformed JSON** | Parse error captured, fallback applied | Shows parse error in debug UI, defaults to confirmation |
 | **Schema validation failure** | Zod reports specific field errors | Defaults to confirmation with error details |
 | **Empty response** | Treated as LLM error | Defaults to confirmation |
 | **Missing critical context** | Signals detect missing params/entities | Falls back to `ask_clarifying_question` |
 | **API key missing** | Error returned to frontend | Clear error message, no fallback execution |
+
+The LLM is called with `responseMimeType: "application/json"` which instructs Gemini to return valid JSON natively, reducing parse failures.
 
 **Core safety principle:** The system *never* falls back to `execute_silently`. When uncertain, it always errs toward confirmation or clarification. This is the most important design decision in the entire system.
 
@@ -163,6 +166,6 @@ Scenario 6 is the illustrative example from the challenge: the system detects co
 - **Next.js 16** (App Router) — Single deployable for API + frontend
 - **TypeScript** — Type safety throughout
 - **Tailwind CSS** — Minimal styling
-- **Claude Sonnet** via `@anthropic-ai/sdk` — Fast, capable reasoning
+- **Gemini 2.5 Flash** via REST API — Fast, capable reasoning with native JSON output mode
 - **Zod** — Runtime validation of LLM output
 - **Vercel** — Deployment

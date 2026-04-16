@@ -6,7 +6,7 @@ import ActionInput from "@/components/ActionInput";
 import DecisionCard from "@/components/DecisionCard";
 import DebugPanel from "@/components/DebugPanel";
 import { ScenarioInput, DecisionResponse } from "@/lib/schema";
-import { PreloadedScenario } from "@/lib/scenarios";
+import { PreloadedScenario, SCENARIOS } from "@/lib/scenarios";
 
 const EMPTY_INPUT: ScenarioInput = {
   action: "",
@@ -21,6 +21,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<DecisionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedScenario = SCENARIOS.find((s) => s.id === selectedScenarioId) ?? null;
 
   const handleSelectScenario = (scenario: PreloadedScenario) => {
     setSelectedScenarioId(scenario.id);
@@ -118,6 +120,8 @@ export default function Home() {
                   decision={response.parsedOutput}
                   fallbackApplied={response.fallbackApplied}
                   fallbackReason={response.fallbackReason}
+                  expectedDecision={selectedScenario?.expectedDecision ?? null}
+                  latencyMs={response.latencyMs}
                 />
                 <div className="bg-white rounded-xl border border-gray-200 p-5">
                   <DebugPanel response={response} />

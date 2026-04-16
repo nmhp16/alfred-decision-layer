@@ -6,6 +6,8 @@ interface Props {
   decision: DecisionOutput;
   fallbackApplied: boolean;
   fallbackReason: string | null;
+  expectedDecision?: string | null;
+  latencyMs?: number;
 }
 
 const DECISION_STYLES: Record<string, { bg: string; border: string; text: string; label: string }> = {
@@ -47,25 +49,77 @@ const RISK_STYLES: Record<string, { color: string; bg: string }> = {
   high: { color: "text-red-700", bg: "bg-red-100" },
 };
 
-export default function DecisionCard({ decision, fallbackApplied, fallbackReason }: Props) {
+function decisionLabel(key: string): string {
+  return DECISION_STYLES[key]?.label ?? key;
+}
+
+export default function DecisionCard({
+  decision,
+  fallbackApplied,
+  fallbackReason,
+  expectedDecision,
+  latencyMs,
+}: Props) {
   const style = DECISION_STYLES[decision.decision] || DECISION_STYLES.confirm_before_execute;
   const riskStyle = RISK_STYLES[decision.risk_level] || RISK_STYLES.medium;
+
+  // Check if actual matches expected (normalize: strip "(fallback)" etc.)
+  const normalizedExpected = expectedDecision?.replace(/\s*\(.*\)/, "").trim();
+  const matches = normalizedExpected
+    ? decision.decision === normalizedExpected
+    : null;
 
   return (
     <div className={`rounded-xl border-2 ${style.border} ${style.bg} p-5`}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <span className={`text-lg font-bold ${style.text}`}>{style.label}</span>
-        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${riskStyle.bg} ${riskStyle.color}`}>
-          Risk: {decision.risk_level}
-        </span>
+        <div className="flex items-center gap-2">
+          {latencyMs != null && (
+            <span className="text-xs font-mono text-gray-400">
+              {latencyMs >= 1000 ? `${(latencyMs / 1000).toFixed(1)}s` : `${latencyMs}ms`}
+            </span>
+          )}
+          <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${riskStyle.bg} ${riskStyle.color}`}>
+            Risk: {decision.risk_level}
+          </span>
+        </div>
       </div>
+
+      {/* Expected vs Actual comparison */}
+      {expectedDecision && (
+        <div
+          className={`mb-3 p-3 rounded-lg border ${
+            matches
+              ? "bg-green-50 border-green-200"
+              : "bg-orange-50 border-orange-200"
+          }`}
+        >
+          <div className="flex items-center gap-2 text-xs">
+            <span className={matches ? "text-green-700" : "text-orange-700"}>
+              {matches ? "MATCH" : "MISMATCH"}
+            </span>
+            <span className="text-gray-400">|</span>
+            <span className="text-gray-600">
+              Expected: <strong>{decisionLabel(normalizedExpected!)}</strong>
+            </span>
+            {!matches && (
+              <>
+                <span className="text-gray-400">vs</span>
+                <span className="text-gray-600">
+                  Got: <strong>{style.label}</strong>
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Fallback warning */}
       {fallbackApplied && (
         <div className="mb-3 p-3 bg-amber-100 border border-amber-300 rounded-lg">
           <p className="text-xs font-medium text-amber-800">
-            ⚠ Fallback Applied
+            Fallback Applied
           </p>
           <p className="text-xs text-amber-700 mt-1">{fallbackReason}</p>
         </div>
@@ -89,7 +143,7 @@ export default function DecisionCard({ decision, fallbackApplied, fallbackReason
           <ul className="space-y-1">
             {decision.notes.map((note, i) => (
               <li key={i} className="text-xs text-gray-600 flex items-start gap-1.5">
-                <span className="text-gray-400 mt-0.5">•</span>
+                <span className="text-gray-400 mt-0.5">&bull;</span>
                 {note}
               </li>
             ))}

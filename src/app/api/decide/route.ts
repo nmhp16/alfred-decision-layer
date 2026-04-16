@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
     }
 
     const input = inputResult.data;
+    const startTime = Date.now();
 
     // Step 1: Compute deterministic signals
     const signals = computeSignals(input);
@@ -32,12 +33,10 @@ export async function POST(request: NextRequest) {
     let llmError: string | null = null;
 
     if (input.simulateFailure === "timeout") {
-      // Simulate timeout
       rawOutput = "";
       timedOut = true;
       llmError = "Simulated LLM timeout (15s exceeded)";
     } else if (input.simulateFailure === "malformed_json") {
-      // Simulate malformed output
       rawOutput = '{"decision": "execute_silently", "rationale": "test", broken json here!!!';
       timedOut = false;
       llmError = null;
@@ -57,6 +56,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Step 5: Build response with full debug info
+    const latencyMs = Date.now() - startTime;
     const response: DecisionResponse = {
       input,
       signals,
@@ -66,6 +66,7 @@ export async function POST(request: NextRequest) {
       fallbackApplied,
       fallbackReason,
       validationStatus: fallbackApplied ? "fallback_used" : "valid",
+      latencyMs,
     };
 
     return NextResponse.json(response);

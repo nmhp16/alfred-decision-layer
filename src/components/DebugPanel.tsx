@@ -122,6 +122,11 @@ export default function DebugPanel({ response }: Props) {
             >
               {response.validationStatus === "valid" ? "Valid LLM Output" : "Fallback Used"}
             </span>
+            <span className="text-xs font-mono text-gray-400">
+              {response.latencyMs >= 1000
+                ? `${(response.latencyMs / 1000).toFixed(1)}s`
+                : `${response.latencyMs}ms`}
+            </span>
           </div>
           {response.fallbackApplied && (
             <div className="text-xs text-amber-700 bg-amber-50 p-2 rounded">

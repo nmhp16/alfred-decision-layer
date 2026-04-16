@@ -1,6 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const LLM_TIMEOUT_MS = 15000;
+const LLM_TIMEOUT_MS = 30000;
 
 interface LLMResult {
   rawOutput: string;
@@ -9,34 +7,50 @@ interface LLMResult {
 }
 
 export async function callLLM(prompt: string): Promise<LLMResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return {
       rawOutput: "",
       timedOut: false,
-      error: "ANTHROPIC_API_KEY is not configured",
+      error: "GEMINI_API_KEY is not configured",
     };
   }
-
-  const client = new Anthropic({ apiKey });
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
 
   try {
-    const response = await client.messages.create(
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-      },
-      { signal: controller.signal }
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 2048,
+            responseMimeType: "application/json",
+          },
+        }),
+        signal: controller.signal,
+      }
     );
 
     clearTimeout(timeout);
 
-    const textBlock = response.content.find((b) => b.type === "text");
-    const rawOutput = textBlock?.text ?? "";
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      return {
+        rawOutput: "",
+        timedOut: false,
+        error: `Gemini API error ${response.status}: ${errText}`,
+      };
+    }
+
+    const data = await response.json();
+    const rawOutput =
+      data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
     return { rawOutput, timedOut: false, error: null };
   } catch (err: unknown) {
